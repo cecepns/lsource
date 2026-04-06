@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { toast } from 'sonner';
+import { BACKEND_BASE_URL } from './endpoints.js';
 
 const TOKEN_KEY = 'mp_token';
 
@@ -13,7 +14,7 @@ export function setToken(token) {
 }
 
 export const api = axios.create({
-  baseURL: '',
+  baseURL: BACKEND_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
 });
 

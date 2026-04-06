@@ -64,9 +64,9 @@ export default function LoginPage() {
             Masuk
           </button>
         </form>
-        <p className="mt-4 text-center text-xs text-slate-500">
+        {/* <p className="mt-4 text-center text-xs text-slate-500">
           Default: admin@local.test / admin123 (setelah DB & server jalan)
-        </p>
+        </p> */}
       </div>
     </div>
   );

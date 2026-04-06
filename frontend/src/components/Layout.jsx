@@ -80,7 +80,18 @@ export default function Layout() {
   }, [location.pathname]);
 
   useEffect(() => {
+    const media = window.matchMedia('(min-width: 768px)');
+    const handleViewportChange = (event) => {
+      if (event.matches) setMobileOpen(false);
+    };
+    if (media.matches) setMobileOpen(false);
+    media.addEventListener('change', handleViewportChange);
+    return () => media.removeEventListener('change', handleViewportChange);
+  }, []);
+
+  useEffect(() => {
     if (!mobileOpen) return;
+    if (window.matchMedia('(min-width: 768px)').matches) return;
     const onKey = (e) => {
       if (e.key === 'Escape') setMobileOpen(false);
     };
@@ -161,7 +172,7 @@ export default function Layout() {
         <SidebarContent user={user} isAdmin={isAdmin} onLogout={handleLogout} />
       </nav>
 
-      <main className="mx-auto max-w-8xl px-3 pb-6 pt-[calc(3.5rem+0.625rem)] md:pb-3.5 md:pl-[calc(228px+0.85rem)] md:pr-4 md:pt-3">
+      <main className="mx-auto w-full max-w-8xl overflow-x-hidden px-3 pb-6 pt-[calc(3.5rem+0.625rem)] md:pb-3.5 md:pl-[calc(228px+0.85rem)] md:pr-4 md:pt-3">
         <Outlet />
       </main>
     </>
