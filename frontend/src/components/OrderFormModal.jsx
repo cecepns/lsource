@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, Save, Trash2 } from 'lucide-react';
 import Select from 'react-select';
 import Modal from './Modal.jsx';
@@ -36,39 +36,14 @@ const emptyLine = () => ({
   nominal_cair: '',
 });
 
-function formatMoneyIdr(n) {
-  if (n == null || Number.isNaN(Number(n))) return '—';
-  return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    maximumFractionDigits: 0,
-  }).format(Number(n));
-}
-
-function labaPreview(qty, hppSnap, nominalStr, status) {
-  const modal = Number(qty) * Number(hppSnap);
-  const raw = nominalStr === '' || nominalStr == null ? null : Number(nominalStr);
-  const nc = Number.isFinite(raw) ? raw : null;
-  if (status === 'retur') return Math.min(0, (nc ?? 0) - modal);
-  if (nc == null) return null;
-  return nc - modal;
-}
-
-/** Satu baris order (edit / legacy) */
-const emptySingle = {
-  ...emptyHeader,
-  product_name: '',
-  variasi: '',
-  qty: 1,
-  selling_price: '',
-  product_id: null,
-  nominal_cair: '',
-};
-
 function productToOption(p) {
+  const bc = p.barcode?.trim();
+  const bits = [p.name];
+  if (bc) bits.push(bc);
+  bits.push(`stok ${p.stock}`);
   return {
     value: p.id,
-    label: `${p.name} (stok ${p.stock})`,
+    label: bits.join(' · '),
     raw: p,
   };
 }
@@ -76,14 +51,13 @@ function productToOption(p) {
 export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
   const isEdit = orderId != null;
   const [stores, setStores] = useState([]);
-  const [form, setForm] = useState(emptySingle);
+  const [form, setForm] = useState(emptyHeader);
   const [lines, setLines] = useState([emptyLine()]);
   const [file, setFile] = useState(null);
   const [productOptions, setProductOptions] = useState([]);
   const [loading, setLoading] = useState(false);
-  /** HPP untuk pratinjau laba di mode edit (snapshot + update saat ganti produk). */
-  const [editHppSnapshot, setEditHppSnapshot] = useState(0);
-  const initialHppSnapshotRef = useRef(0);
+  /** ID baris DB yang akan diganti saat simpan edit (satu pesanan multi-item). */
+  const [groupLineIds, setGroupLineIds] = useState([]);
 
   useEffect(() => {
     if (!open) return;
@@ -95,33 +69,42 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
     setFile(null);
     setProductOptions([]);
     if (!isEdit) {
-      setForm({ ...emptySingle });
+      setForm({ ...emptyHeader });
       setLines([emptyLine()]);
-      setEditHppSnapshot(0);
-      initialHppSnapshotRef.current = 0;
+      setGroupLineIds([]);
       return;
     }
     setLoading(true);
     api
       .get(`/api/orders/${orderId}`)
-      .then(({ data: row }) => {
-        const hpp = Number(row.hpp_snapshot) || 0;
-        initialHppSnapshotRef.current = hpp;
-        setEditHppSnapshot(hpp);
+      .then(({ data: bundle }) => {
+        const ids = Array.isArray(bundle.group_line_ids) ? bundle.group_line_ids : [];
+        setGroupLineIds(ids);
         setForm({
-          order_no: row.order_no,
-          resi: row.resi || '',
-          product_name: row.product_name,
-          variasi: row.variasi || '',
-          qty: row.qty,
-          selling_price: String(row.selling_price),
-          store_id: row.store_id,
-          product_id: row.product_id,
-          order_date: row.order_date?.slice?.(0, 10) || row.order_date,
-          status: row.status,
-          nominal_cair: row.nominal_cair != null ? String(row.nominal_cair) : '',
-          notes: row.notes || '',
+          order_no: bundle.order_no,
+          resi: bundle.resi || '',
+          store_id: bundle.store_id,
+          order_date: bundle.order_date?.slice?.(0, 10) || bundle.order_date,
+          status: bundle.status,
+          notes: bundle.notes || '',
         });
+        const items = Array.isArray(bundle.items) ? bundle.items : [];
+        setLines(
+          items.length
+            ? items.map((it) => ({
+                product_name: it.product_name,
+                variasi: it.variasi || '',
+                qty: it.qty,
+                selling_price:
+                  it.selling_price != null ? String(it.selling_price) : '',
+                product_id: it.product_id,
+                nominal_cair:
+                  it.nominal_cair != null && it.nominal_cair !== ''
+                    ? String(it.nominal_cair)
+                    : '',
+              }))
+            : [emptyLine()]
+        );
         api
           .get('/api/products', {
             params: { page: 1, limit: 100, search: '' },
@@ -186,22 +169,44 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
 
     try {
       if (isEdit) {
+        if (!groupLineIds.length) {
+          const { toast } = await import('sonner');
+          toast.error('Data pesanan tidak valid. Tutup dan buka lagi dari daftar.');
+          return;
+        }
+        const items = lines.map((l) => ({
+          product_name: l.product_name.trim(),
+          variasi: l.variasi?.trim() || null,
+          qty: Number(l.qty) || 1,
+          selling_price: Number(l.selling_price) || 0,
+          product_id: l.product_id || null,
+          nominal_cair:
+            l.nominal_cair === '' || l.nominal_cair == null
+              ? null
+              : Number(l.nominal_cair),
+        }));
+        if (items.some((it) => !it.product_name)) {
+          const { toast } = await import('sonner');
+          toast.error('Setiap baris produk wajib punya nama');
+          return;
+        }
+        if (items.some((it) => it.qty < 1)) {
+          const { toast } = await import('sonner');
+          toast.error('Qty tiap baris minimal 1');
+          return;
+        }
         const payload = {
+          line_ids: groupLineIds,
           order_no: form.order_no,
           resi: form.resi || null,
-          product_name: form.product_name,
-          variasi: form.variasi || null,
-          qty: Number(form.qty) || 1,
-          selling_price: Number(form.selling_price) || 0,
           store_id: form.store_id,
-          product_id: form.product_id || null,
           order_date: form.order_date,
           status: form.status,
-          nominal_cair: form.nominal_cair === '' ? null : Number(form.nominal_cair),
           notes: form.notes || null,
+          items,
         };
-        await apiCall(api.put(`/api/orders/${orderId}`, payload), {
-          success: 'Order diperbarui',
+        await apiCall(api.put('/api/orders/group', payload), {
+          success: 'Pesanan diperbarui',
           loading: 'Menyimpan…',
         });
       } else {
@@ -291,8 +296,15 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
               <input value={form.order_no} onChange={(e) => setField('order_no', e.target.value)} required />
             </div>
             <div>
-              <label>No resi</label>
-              <input value={form.resi} onChange={(e) => setField('resi', e.target.value)} />
+              <label>
+                No resi
+                <span className="ml-1 font-normal text-slate-500">(satu resi untuk seluruh barang)</span>
+              </label>
+              <input
+                value={form.resi}
+                onChange={(e) => setField('resi', e.target.value)}
+                placeholder="Opsional — sama untuk semua produk di bawah"
+              />
             </div>
             <div>
               <label>Toko (channel penjualan) *</label>
@@ -302,12 +314,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                 onChange={(o) => {
                   const sid = o?.value ?? null;
                   setField('store_id', sid);
-                  if (!isEdit) {
-                    setField('product_id', null);
-                    setLines([emptyLine()]);
-                  } else {
-                    setField('product_id', null);
-                  }
+                  if (!isEdit) setLines([emptyLine()]);
                   setProductOptions([]);
                   void loadProductsBySearch('');
                 }}
@@ -321,12 +328,17 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
             </div>
           </div>
 
-          {!isEdit && (
-            <div className="mt-5 border-t border-slate-100 pt-4">
+          <div className="mt-5 border-t border-slate-100 pt-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-900">Produk dalam pesanan</h3>
-                  <p className="muted mt-0.5 text-xs">Satu nomor pesanan bisa berisi beberapa baris produk.</p>
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    {isEdit ? 'Item dalam pesanan ini' : 'Produk dalam pesanan'}
+                  </h3>
+                  <p className="muted mt-0.5 text-xs">
+                    {isEdit
+                      ? 'Semua baris di bawah disimpan bersama satu nomor pesanan dan resi. Mengubah resi hanya memperbarui pesanan ini, tanpa membuat data baru.'
+                      : 'Satu nomor pesanan dan satu no. resi = satu kiriman. Tambahkan beberapa baris untuk banyak jenis barang dalam kiriman yang sama — bukan satu resi per produk.'}
+                  </p>
                 </div>
                 <button type="button" className="btn btn-ghost text-sm" onClick={addProductLine}>
                   <Plus size={18} strokeWidth={2} aria-hidden />
@@ -360,7 +372,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                         <div className="mt-1">
                           <Select
                             isClearable
-                            placeholder="Cari produk (ketik di dropdown)"
+                            placeholder="Ketik nama atau barcode…"
                             options={productOptions}
                             onInputChange={handleProductInputChange}
                             onMenuOpen={() => {
@@ -370,6 +382,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                               typeof document !== 'undefined' ? document.body : null
                             }
                             menuPosition="fixed"
+                            filterOption={() => true}
                             value={
                               line.product_id
                                 ? productOptions.find((o) => o.value === line.product_id) || {
@@ -438,129 +451,28 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                 ))}
               </div>
             </div>
-          )}
 
-          {isEdit && (
-            <>
-              <div className="mt-4">
-                <label>Hubungkan produk (opsional — stok otomatis)</label>
-                <div className="mt-1.5">
-                  <Select
-                    isClearable
-                    placeholder="Cari produk (ketik di dropdown)"
-                    options={productOptions}
-                    onInputChange={handleProductInputChange}
-                    onMenuOpen={() => {
-                      void loadProductsBySearch('');
-                    }}
-                    menuPortalTarget={
-                      typeof document !== 'undefined' ? document.body : null
-                    }
-                    menuPosition="fixed"
-                    value={
-                      form.product_id
-                        ? productOptions.find((o) => o.value === form.product_id) || {
-                            value: form.product_id,
-                            label: `ID ${form.product_id}`,
-                          }
-                        : null
-                    }
-                    onChange={(o) => {
-                      setField('product_id', o?.value ?? null);
-                      if (o?.raw) {
-                        setField('product_name', o.raw.name);
-                        setEditHppSnapshot(Number(o.raw.hpp) || 0);
-                      } else if (!o) {
-                        setEditHppSnapshot(initialHppSnapshotRef.current);
-                      }
-                    }}
-                    styles={productSelectStyles}
-                  />
-                </div>
-              </div>
-
-              <div className="form-row cols-2 mt-4">
-                <div>
-                  <label>Nama produk *</label>
-                  <input value={form.product_name} onChange={(e) => setField('product_name', e.target.value)} required />
-                </div>
-                <div>
-                  <label>Variasi</label>
-                  <input value={form.variasi} onChange={(e) => setField('variasi', e.target.value)} />
-                </div>
-                <div>
-                  <label>Qty *</label>
-                  <input type="number" min={1} value={form.qty} onChange={(e) => setField('qty', e.target.value)} required />
-                </div>
-                <div>
-                  <label>Harga jual</label>
-                  <input type="number" min={0} value={form.selling_price} onChange={(e) => setField('selling_price', e.target.value)} />
-                </div>
-                <div>
-                  <label>Status</label>
-                  <Select
-                    options={statusOptions}
-                    value={statusOptions.find((o) => o.value === form.status)}
-                    onChange={(o) => setField('status', o?.value || 'diproses')}
-                    styles={selectStyles()}
-                  />
-                </div>
-                <div>
-                  <label>Nominal cair (kosongkan = belum cair)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={form.nominal_cair}
-                    onChange={(e) => setField('nominal_cair', e.target.value)}
-                    placeholder="Opsional"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/90 p-3 text-sm">
-                <p className="mb-2 font-semibold text-slate-800">Perhitungan (pratinjau)</p>
-                <ul className="muted space-y-1 text-xs">
-                  <li>
-                    HPP (modal per unit, snapshot):{' '}
-                    <span className="font-medium text-slate-700">{formatMoneyIdr(editHppSnapshot)}</span>
-                  </li>
-                  <li>
-                    Total modal (qty × HPP):{' '}
-                    <span className="font-medium text-slate-700">
-                      {formatMoneyIdr(Number(form.qty) * Number(editHppSnapshot))}
-                    </span>
-                  </li>
-                  <li>
-                    Laba (nominal cair − total modal; retur: min 0 vs rugi):{' '}
-                    <span className="font-semibold text-slate-900">
-                      {formatMoneyIdr(labaPreview(form.qty, editHppSnapshot, form.nominal_cair, form.status))}
-                    </span>
-                  </li>
-                </ul>
-                <p className="mt-2 text-xs text-slate-500">
-                  Isi nominal cair untuk melihat laba. Tanpa nominal, laba di daftar tetap &quot;—&quot; sampai diisi.
-                </p>
-              </div>
-            </>
-          )}
-
-          {!isEdit && (
-            <div className="form-row cols-2 mt-4">
-              <div>
-                <label>Status</label>
-                <Select
-                  options={statusOptions}
-                  value={statusOptions.find((o) => o.value === form.status)}
-                  onChange={(o) => setField('status', o?.value || 'diproses')}
-                  styles={selectStyles()}
-                />
-              </div>
+          <div className="form-row cols-2 mt-4">
+            <div>
+              <label>Status order</label>
+              <Select
+                options={statusOptions}
+                value={statusOptions.find((o) => o.value === form.status)}
+                onChange={(o) => setField('status', o?.value || 'diproses')}
+                styles={selectStyles()}
+              />
+            </div>
+            {!isEdit ? (
               <div>
                 <label>Lampiran (opsional, terpasang ke baris pertama)</label>
                 <input type="file" onChange={(e) => setFile(e.target.files?.[0] || null)} />
               </div>
-            </div>
-          )}
+            ) : (
+              <div className="muted text-sm leading-snug">
+                Lampiran hanya bisa ditambahkan saat buat order baru.
+              </div>
+            )}
+          </div>
 
           <div className="mt-4">
             <label>Catatan</label>

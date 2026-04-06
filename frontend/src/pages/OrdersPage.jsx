@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FileDown, Pencil, Plus, ShoppingCart, Trash2 } from 'lucide-react';
+import { Eye, FileDown, Pencil, Plus, ShoppingCart, Trash2 } from 'lucide-react';
 import Select from 'react-select';
 import { api, apiCall, toastApiError } from '../utils/api.js';
 import { confirmAction } from '../utils/confirm.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
 import OrderFormModal from '../components/OrderFormModal.jsx';
+import Modal from '../components/Modal.jsx';
 import PaginationBar from '../components/PaginationBar.jsx';
 import OrderStatusBadge from '../components/OrderStatusBadge.jsx';
 import { selectStyles } from '../components/selectTheme.js';
@@ -35,6 +36,24 @@ function formatMoney(n) {
   }).format(Number(n));
 }
 
+function formatDate(value) {
+  if (!value) return '—';
+  // Jika backend kirim 'YYYY-MM-DD', tampilkan apa adanya (lebih aman, tidak kena timezone)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+    return value;
+  }
+  // Jika ISO / format lain, fallback ke tanggal lokal Indonesia (tanpa jam)
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleDateString('id-ID');
+}
+
+/** Nominal cair di list grup: jika semua baris belum ada nominal, tampilkan — */
+function formatGroupNominalCair(o) {
+  if (o.payout_status_label === 'Belum Cair') return '—';
+  return formatMoney(o.nominal_cair_sum);
+}
+
 export default function OrdersPage() {
   const { isAdmin } = useAuth();
   const [searchInput, setSearchInput] = useState('');
@@ -50,6 +69,11 @@ export default function OrdersPage() {
   const [total, setTotal] = useState(0);
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [orderEditingId, setOrderEditingId] = useState(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailData, setDetailData] = useState(null);
+  /** ID baris representatif (sama yang dipakai GET /api/orders/:id) untuk buka form edit dari modal. */
+  const [detailListRowId, setDetailListRowId] = useState(null);
 
   const fetchOrders = useCallback(
     async (pageOverride) => {
@@ -98,6 +122,28 @@ export default function OrdersPage() {
     setOrderEditingId(null);
   }
 
+  function closeDetailModal() {
+    setDetailOpen(false);
+    setDetailData(null);
+    setDetailListRowId(null);
+  }
+
+  async function openOrderDetail(id) {
+    setDetailListRowId(id);
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setDetailData(null);
+    try {
+      const { data } = await api.get(`/api/orders/${id}`);
+      setDetailData(data);
+    } catch (e) {
+      toastApiError(e);
+      setDetailOpen(false);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
   async function handleExport() {
     const params = new URLSearchParams({ search });
     if (storeId) params.set('store_id', storeId);
@@ -120,17 +166,17 @@ export default function OrdersPage() {
 
   async function handleDelete(id) {
     const ok = await confirmAction({
-      message: 'Hapus order ini? Stok akan dikembalikan jika terhubung produk.',
+      message:
+        'Hapus pesanan ini beserta semua item di dalamnya? Stok akan dikembalikan jika terhubung produk.',
       confirmLabel: 'Hapus',
     });
     if (!ok) return;
     try {
       await apiCall(api.delete(`/api/orders/${id}`), {
-        success: 'Order dihapus',
+        success: 'Pesanan dihapus',
         loading: 'Menghapus…',
       });
-      setRows((r) => r.filter((x) => x.id !== id));
-      setTotal((t) => Math.max(0, t - 1));
+      await fetchOrders();
     } catch {
       /* toast */
     }
@@ -149,7 +195,7 @@ export default function OrdersPage() {
           <Plus size={18} strokeWidth={2} aria-hidden />
           Order baru
         </button>
-        <button type="button" className="btn btn-ghost" onClick={handleExport}>
+        <button type="button" className="btn btn-secondary" onClick={handleExport}>
           <FileDown size={18} strokeWidth={2} aria-hidden />
           Export Excel
         </button>
@@ -158,7 +204,7 @@ export default function OrdersPage() {
       <div className="card mb-4">
         <div className="form-row">
           <div>
-            <label>Cari (no pesanan, produk, resi) </label>
+            <label>Cari (no pesanan, nama produk, barcode, resi)</label>
             <input
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
@@ -213,62 +259,56 @@ export default function OrdersPage() {
         <table className="table-app">
           <thead>
             <tr>
-              <th>No</th>
-              <th>Produk</th>
+              <th>Pesanan</th>
               <th>Qty</th>
               <th>Toko</th>
               <th>Tgl</th>
               <th>Status order</th>
-              <th className="min-w-[9rem] whitespace-normal leading-tight">
-                Pencairan
-                <span className="mt-0.5 block text-xs font-normal text-slate-400">Status · nominal cair</span>
-              </th>
-              <th className="whitespace-normal leading-tight">
-                Total modal
-                <span className="mt-0.5 block text-xs font-normal text-slate-400">qty × HPP</span>
-              </th>
-              <th className="whitespace-normal leading-tight">
-                Laba
-                <span className="mt-0.5 block text-xs font-normal text-slate-400">cair − modal</span>
-              </th>
-              <th className="w-36">Aksi</th>
+              <th>Pencairan</th>
+              <th>Total modal</th>
+              <th>Laba</th>
+              <th className="min-w-[12rem]">Aksi</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((o) => (
               <tr key={o.id}>
-                <td>
-                  <button
-                    type="button"
-                    className="text-left font-semibold text-blue-600 hover:underline"
-                    onClick={() => openEditOrder(o.id)}
-                  >
-                    {o.order_no}
-                  </button>
+                <td className="align-top">
+                  {o.item_count > 1 && (
+                    <span className="mb-1 inline-block rounded bg-blue-100 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-blue-800">
+                      {o.item_count} item
+                    </span>
+                  )}
+                  <div className="font-semibold text-slate-900">{o.order_no}</div>
                   <div className="muted text-xs">{o.resi || '—'}</div>
                 </td>
-                <td>{o.product_name}</td>
-                <td>{o.qty}</td>
-                <td>{o.store_name}</td>
-                <td>{o.order_date}</td>
-                <td>
+                <td className="tabular-nums align-top">{o.qty_sum}</td>
+                <td className="align-top">{o.store_name}</td>
+                <td className="align-top">{formatDate(o.order_date)}</td>
+                <td className="align-top">
                   <OrderStatusBadge status={o.status} />
                 </td>
                 <td>
                   <span className="font-medium text-slate-700" style={{ fontSize: '0.75rem' }}>
                     {o.payout_status_label ?? '—'}
                   </span>
-                  <div className="tabular-nums">{formatMoney(o.nominal_cair)}</div>
+                  <div className="tabular-nums">{formatGroupNominalCair(o)}</div>
                 </td>
-                <td className="tabular-nums text-slate-700">
-                  {formatMoney(Number(o.qty) * Number(o.hpp_snapshot ?? 0))}
-                </td>
+                <td className="tabular-nums text-slate-700">{formatMoney(o.total_modal)}</td>
                 <td className="tabular-nums font-medium text-slate-900">{formatMoney(o.laba)}</td>
                 <td>
-                  <div className="flex flex-wrap gap-1">
+                  <div className="flex flex-wrap gap-1.5">
                     <button
                       type="button"
-                      className="btn btn-ghost min-h-9 px-2.5 text-xs"
+                      className="btn btn-secondary min-h-9 px-2.5 text-xs"
+                      onClick={() => openOrderDetail(o.id)}
+                    >
+                      <Eye size={14} strokeWidth={2} aria-hidden />
+                      Lihat detail
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-primary min-h-9 px-2.5 text-xs"
                       onClick={() => openEditOrder(o.id)}
                     >
                       <Pencil size={14} strokeWidth={2} aria-hidden />
@@ -277,7 +317,7 @@ export default function OrdersPage() {
                     {isAdmin && (
                       <button
                         type="button"
-                        className="btn btn-danger min-h-9 px-2.5 text-xs"
+                        className="btn min-h-9 border-0 bg-red-600 px-2.5 text-xs text-white shadow-sm hover:bg-red-700"
                         onClick={() => handleDelete(o.id)}
                       >
                         <Trash2 size={16} strokeWidth={2} aria-hidden />
@@ -301,6 +341,94 @@ export default function OrdersPage() {
         orderId={orderEditingId}
         onSaved={fetchOrders}
       />
+
+      <Modal
+        open={detailOpen}
+        onClose={closeDetailModal}
+        title={detailData?.order_no ? `Pesanan ${detailData.order_no}` : 'Detail pesanan'}
+        size="2xl"
+      >
+        {detailLoading && <p className="muted py-6 text-center">Memuat…</p>}
+        {!detailLoading && detailData && (
+          <div className="space-y-4 text-sm">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div>
+                <span className="muted text-xs">No resi</span>
+                <div className="font-medium text-slate-900">{detailData.resi || '—'}</div>
+              </div>
+              <div>
+                <span className="muted text-xs">Toko</span>
+                <div className="font-medium text-slate-900">{detailData.store_name ?? '—'}</div>
+              </div>
+              <div>
+                <span className="muted text-xs">Tanggal</span>
+                <div className="font-medium text-slate-900">{formatDate(detailData.order_date)}</div>
+              </div>
+              <div>
+                <span className="muted text-xs">Status</span>
+                <div className="mt-1">
+                  <OrderStatusBadge status={detailData.status} />
+                </div>
+              </div>
+            </div>
+            {detailData.notes ? (
+              <div>
+                <span className="muted text-xs">Catatan</span>
+                <p className="mt-0.5 whitespace-pre-wrap text-slate-800">{detailData.notes}</p>
+              </div>
+            ) : null}
+            <div>
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Item
+              </h3>
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <table className="table-app text-sm">
+                  <thead>
+                    <tr>
+                      <th>Produk</th>
+                      <th>Variasi</th>
+                      <th>Qty</th>
+                      <th>Harga jual</th>
+                      <th>Nominal cair</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(detailData.items || []).map((it) => (
+                      <tr key={it.id}>
+                        <td className="font-medium text-slate-800">{it.product_name}</td>
+                        <td>{it.variasi || '—'}</td>
+                        <td className="tabular-nums">{it.qty}</td>
+                        <td className="tabular-nums">{formatMoney(it.selling_price)}</td>
+                        <td className="tabular-nums">
+                          {it.nominal_cair != null ? formatMoney(it.nominal_cair) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+              <button type="button" className="btn btn-secondary px-4" onClick={closeDetailModal}>
+                Tutup
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary px-4"
+                onClick={() => {
+                  if (detailListRowId != null) {
+                    closeDetailModal();
+                    openEditOrder(detailListRowId);
+                  }
+                }}
+              >
+                <Pencil size={16} strokeWidth={2} aria-hidden />
+                Edit pesanan
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

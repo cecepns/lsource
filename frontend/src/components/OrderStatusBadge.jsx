@@ -3,6 +3,7 @@ const styles = {
   dikirim: 'border-blue-200 bg-blue-50 text-blue-700',
   selesai: 'border-green-200 bg-green-50 text-green-700',
   retur: 'border-red-200 bg-red-50 text-red-700',
+  campuran: 'border-violet-200 bg-violet-50 text-violet-800',
 };
 
 export default function OrderStatusBadge({ status }) {

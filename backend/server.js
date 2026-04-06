@@ -23,6 +23,9 @@ const pool = mysql.createPool({
   database: process.env.MYSQL_DATABASE || 'manajemen_penjualan',
   waitForConnections: true,
   connectionLimit: 10,
+  // Bantu mencegah putus idle connection yang memicu ECONNRESET di beberapa host.
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0,
 });
 
 const app = express();
@@ -66,6 +69,15 @@ function labaForRow(row) {
   if (row.status === 'retur') return Math.min(0, (nc ?? 0) - modal);
   if (nc == null) return null;
   return nc - modal;
+}
+
+/** Kunci grup pesanan (satu tampilan list) — samakan dengan GROUP BY list. */
+function orderDateKeyDb(v) {
+  if (!v) return '';
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  const s = String(v);
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  return s.slice(0, 10);
 }
 
 async function ensureDefaultAdmin() {
@@ -311,9 +323,9 @@ app.get('/api/orders/export', authRequired, async (req, res) => {
   try {
     const { store_id, date_from, date_to, payout, search = '' } = req.query;
     let where =
-      '(o.order_no LIKE ? OR o.product_name LIKE ? OR IFNULL(o.resi,"") LIKE ?)';
+      '(o.order_no LIKE ? OR o.product_name LIKE ? OR IFNULL(o.resi,"") LIKE ? OR IFNULL(pr.barcode,"") LIKE ?)';
     const q = `%${String(search).trim()}%`;
-    const params = [q, q, q];
+    const params = [q, q, q, q];
     if (store_id) {
       where += ' AND o.store_id = ?';
       params.push(store_id);
@@ -331,7 +343,9 @@ app.get('/api/orders/export', authRequired, async (req, res) => {
 
     const [rows] = await pool.query(
       `SELECT o.*, s.name AS store_name FROM orders o
-       JOIN stores s ON s.id = o.store_id WHERE ${where} ORDER BY o.order_date DESC, o.id DESC`,
+       JOIN stores s ON s.id = o.store_id
+       LEFT JOIN products pr ON pr.id = o.product_id
+       WHERE ${where} ORDER BY o.order_date DESC, o.id DESC`,
       params
     );
 
@@ -369,11 +383,35 @@ app.get('/api/orders/:id', authRequired, async (req, res) => {
     );
     const row = rows[0];
     if (!row) return res.status(404).json({ message: 'Tidak ada' });
+    const [siblings] = await pool.query(
+      `SELECT o.*, s.name AS store_name,
+        CASE WHEN o.nominal_cair IS NULL THEN 'Belum Cair' ELSE 'Sudah Cair' END AS payout_status_label
+       FROM orders o
+       JOIN stores s ON s.id = o.store_id
+       WHERE o.order_no = ? AND o.store_id = ? AND DATE(o.order_date) = DATE(?)
+       ORDER BY o.id ASC`,
+      [row.order_no, row.store_id, row.order_date]
+    );
+    const first = siblings[0];
+    const items = siblings.map((r) => ({
+      id: r.id,
+      product_name: r.product_name,
+      variasi: r.variasi || '',
+      qty: r.qty,
+      selling_price: r.selling_price,
+      product_id: r.product_id,
+      nominal_cair: r.nominal_cair,
+    }));
     res.json({
-      ...row,
-      payout_status: payoutLabel(row),
-      laba: labaForRow(row),
-      total_modal: Number(row.qty) * Number(row.hpp_snapshot),
+      group_line_ids: siblings.map((r) => r.id),
+      order_no: first.order_no,
+      resi: first.resi || '',
+      store_id: first.store_id,
+      store_name: first.store_name,
+      order_date: orderDateKeyDb(first.order_date),
+      status: first.status,
+      notes: first.notes || '',
+      items,
     });
   } catch (e) {
     console.error(e);
@@ -396,8 +434,8 @@ app.get('/api/orders', authRequired, async (req, res) => {
     const { page: p, limit: l, offset } = paginate(page, limit);
     const q = `%${String(search).trim()}%`;
     let where =
-      '(o.order_no LIKE ? OR o.product_name LIKE ? OR IFNULL(o.resi,"") LIKE ?)';
-    const params = [q, q, q];
+      '(o.order_no LIKE ? OR o.product_name LIKE ? OR IFNULL(o.resi,"") LIKE ? OR IFNULL(pr.barcode,"") LIKE ?)';
+    const params = [q, q, q, q];
     if (store_id) {
       where += ' AND o.store_id = ?';
       params.push(store_id);
@@ -410,33 +448,108 @@ app.get('/api/orders', authRequired, async (req, res) => {
       where += ' AND o.order_date <= ?';
       params.push(date_to);
     }
-    if (payout === 'belum') where += ' AND o.nominal_cair IS NULL';
-    else if (payout === 'sudah') where += ' AND o.nominal_cair IS NOT NULL';
     if (status && ['diproses', 'dikirim', 'selesai', 'retur'].includes(status)) {
       where += ' AND o.status = ?';
       params.push(status);
     }
+
+    let payoutHaving = '';
+    if (payout === 'belum') {
+      payoutHaving =
+        ' HAVING SUM(CASE WHEN o.nominal_cair IS NULL THEN 1 ELSE 0 END) > 0';
+    } else if (payout === 'sudah') {
+      payoutHaving =
+        ' HAVING SUM(CASE WHEN o.nominal_cair IS NULL THEN 1 ELSE 0 END) = 0 AND COUNT(*) > 0';
+    }
+
+    const groupBy = 'o.order_no, o.store_id, DATE(o.order_date)';
+
     const [countRows] = await pool.query(
-      `SELECT COUNT(*) AS c FROM orders o WHERE ${where}`,
+      `SELECT COUNT(*) AS c FROM (
+        SELECT 1 AS x
+        FROM orders o
+        JOIN stores s ON s.id = o.store_id
+        LEFT JOIN products pr ON pr.id = o.product_id
+        WHERE ${where}
+        GROUP BY ${groupBy}
+        ${payoutHaving}
+      ) grp`,
       params
     );
     const total = countRows[0].c;
+
     const [rows] = await pool.query(
-      `SELECT o.*, s.name AS store_name,
-        CASE WHEN o.nominal_cair IS NULL THEN 'Belum Cair' ELSE 'Sudah Cair' END AS payout_status_label
+      `SELECT
+         MIN(o.id) AS id,
+         GROUP_CONCAT(o.id ORDER BY o.id SEPARATOR ',') AS line_ids_csv,
+         o.order_no,
+         MAX(IFNULL(o.resi,'')) AS resi,
+         o.store_id,
+         MAX(s.name) AS store_name,
+         MIN(o.order_date) AS order_date,
+         COUNT(*) AS item_count,
+         SUM(o.qty) AS qty_sum,
+         SUM(o.qty * o.hpp_snapshot) AS total_modal,
+         GROUP_CONCAT(
+           CONCAT(o.product_name, ' × ', o.qty)
+           ORDER BY o.id SEPARATOR '\n'
+         ) AS products_label,
+         CASE
+           WHEN COUNT(DISTINCT o.status) = 1 THEN MIN(o.status)
+           ELSE 'campuran'
+         END AS status,
+         CASE
+           WHEN SUM(CASE WHEN o.nominal_cair IS NULL THEN 1 ELSE 0 END) = COUNT(*) THEN 'Belum Cair'
+           WHEN SUM(CASE WHEN o.nominal_cair IS NULL THEN 1 ELSE 0 END) = 0 THEN 'Sudah Cair'
+           ELSE 'Sebagian cair'
+         END AS payout_status_label,
+         SUM(IFNULL(o.nominal_cair,0)) AS nominal_cair_sum,
+         CASE
+           WHEN SUM(CASE WHEN o.status != 'retur' AND o.nominal_cair IS NULL THEN 1 ELSE 0 END) > 0 THEN NULL
+           ELSE SUM(
+             CASE
+               WHEN o.status = 'retur' THEN LEAST(0, IFNULL(o.nominal_cair,0) - o.qty * o.hpp_snapshot)
+               ELSE o.nominal_cair - o.qty * o.hpp_snapshot
+             END
+           )
+         END AS laba
        FROM orders o
        JOIN stores s ON s.id = o.store_id
+       LEFT JOIN products pr ON pr.id = o.product_id
        WHERE ${where}
-       ORDER BY o.order_date DESC, o.id DESC
+       GROUP BY ${groupBy}
+       ${payoutHaving}
+       ORDER BY MIN(o.order_date) DESC, MIN(o.id) DESC
        LIMIT ? OFFSET ?`,
       [...params, l, offset]
     );
-    const data = rows.map((row) => ({
-      ...row,
-      payout_status: payoutLabel(row),
-      laba: labaForRow(row),
-      total_modal: Number(row.qty) * Number(row.hpp_snapshot),
-    }));
+
+    const data = rows.map((row) => {
+      const lineIds = row.line_ids_csv
+        ? String(row.line_ids_csv)
+            .split(',')
+            .map((x) => Number(x))
+            .filter((n) => n > 0)
+        : [Number(row.id)];
+      return {
+        id: Number(row.id),
+        line_ids: lineIds,
+        order_no: row.order_no,
+        resi: row.resi || '',
+        store_id: row.store_id,
+        store_name: row.store_name,
+        order_date: row.order_date,
+        item_count: Number(row.item_count),
+        qty_sum: Number(row.qty_sum),
+        total_modal: Number(row.total_modal),
+        products_label: row.products_label || '',
+        status: row.status,
+        payout_status_label: row.payout_status_label,
+        nominal_cair_sum:
+          row.nominal_cair_sum != null ? Number(row.nominal_cair_sum) : 0,
+        laba: row.laba != null ? Number(row.laba) : null,
+      };
+    });
     res.json({ data, page: p, limit: l, total });
   } catch (e) {
     console.error(e);
@@ -633,6 +746,166 @@ app.post('/api/orders', authRequired, orderUploadMaybe, async (req, res) => {
   }
 });
 
+/** Ganti seluruh baris DB satu pesanan (multi-item): hapus line_ids lalu insert ulang seperti order baru. */
+app.put('/api/orders/group', authRequired, async (req, res) => {
+  const body = req.body || {};
+  let lineIds = Array.isArray(body.line_ids)
+    ? body.line_ids.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0)
+    : [];
+  lineIds = [...new Set(lineIds)].sort((a, b) => a - b);
+  if (!lineIds.length)
+    return res.status(400).json({ message: 'line_ids wajib' });
+
+  const items = body.items;
+  if (!Array.isArray(items) || !items.length)
+    return res.status(400).json({ message: 'Minimal satu item' });
+
+  const order_no = body.order_no;
+  const store_id = body.store_id;
+  const order_date = body.order_date;
+  if (!order_no?.trim() || !store_id || !order_date)
+    return res.status(400).json({
+      message: 'No pesanan, toko, dan tanggal wajib',
+    });
+
+  const stat = body.status || 'diproses';
+  const resi = body.resi?.trim() || null;
+  const notes = body.notes?.trim() || null;
+
+  const conn = await pool.getConnection();
+  try {
+    const [existing] = await conn.query(
+      `SELECT * FROM orders WHERE id IN (${lineIds.map(() => '?').join(',')})`,
+      lineIds
+    );
+    if (existing.length !== lineIds.length) {
+      return res.status(400).json({ message: 'Beberapa baris order tidak ditemukan' });
+    }
+    const keys = new Set(
+      existing.map(
+        (r) =>
+          `${r.order_no}\0${r.store_id}\0${orderDateKeyDb(r.order_date)}`
+      )
+    );
+    if (keys.size !== 1) {
+      return res.status(400).json({
+        message: 'line_ids harus dari satu pesanan yang sama',
+      });
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!it.product_name?.trim()) {
+        return res.status(400).json({
+          message: `Baris ${i + 1}: nama produk wajib`,
+        });
+      }
+      const qty = Number(it.qty) || 1;
+      if (qty < 1) {
+        return res.status(400).json({
+          message: `Baris ${i + 1}: qty tidak valid`,
+        });
+      }
+    }
+
+    const sorted = [...existing].sort((a, b) => a.id - b.id);
+    const firstAttachment = sorted[0].attachment_path;
+
+    await conn.beginTransaction();
+
+    for (const row of sorted) {
+      if (row.product_id && shouldConsumeStock(row.status)) {
+        await conn.query('UPDATE products SET stock = stock + ? WHERE id = ?', [
+          row.qty,
+          row.product_id,
+        ]);
+      }
+    }
+
+    await conn.query(
+      `DELETE FROM orders WHERE id IN (${lineIds.map(() => '?').join(',')})`,
+      lineIds
+    );
+
+    const ids = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const product_name = it.product_name.trim();
+      const qty = Number(it.qty) || 1;
+      let product_id = it.product_id ? Number(it.product_id) : null;
+      let hpp_snapshot = Number(it.hpp_snapshot) || 0;
+      if (product_id) {
+        const [prows] = await conn.query(
+          'SELECT hpp, stock FROM products WHERE id = ? FOR UPDATE',
+          [product_id]
+        );
+        const pr = prows[0];
+        if (!pr) {
+          await conn.rollback();
+          return res.status(400).json({
+            message: `Baris ${i + 1}: produk tidak ditemukan`,
+          });
+        }
+        hpp_snapshot = Number(pr.hpp);
+        if (shouldConsumeStock(stat) && pr.stock < qty) {
+          await conn.rollback();
+          return res.status(400).json({
+            message: `Baris ${i + 1}: stok produk tidak cukup`,
+          });
+        }
+      }
+      const nominal_cair =
+        it.nominal_cair === '' ||
+        it.nominal_cair == null ||
+        it.nominal_cair === undefined
+          ? null
+          : Number(it.nominal_cair);
+      const payout_at = nominal_cair != null ? new Date() : null;
+      const rowAttachment = i === 0 ? firstAttachment : null;
+
+      const [ins] = await conn.query(
+        `INSERT INTO orders (
+            order_no, resi, product_name, variasi, qty, selling_price, hpp_snapshot,
+            store_id, product_id, order_date, status, nominal_cair, payout_at, attachment_path, notes
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [
+          order_no.trim(),
+          resi,
+          product_name,
+          it.variasi?.trim() || null,
+          qty,
+          Number(it.selling_price) || 0,
+          hpp_snapshot,
+          store_id,
+          product_id,
+          order_date,
+          stat,
+          nominal_cair,
+          payout_at,
+          rowAttachment,
+          notes,
+        ]
+      );
+      ids.push(ins.insertId);
+      if (product_id && shouldConsumeStock(stat)) {
+        await conn.query('UPDATE products SET stock = stock - ? WHERE id = ?', [
+          qty,
+          product_id,
+        ]);
+      }
+    }
+
+    await conn.commit();
+    res.json({ ok: true, ids, count: ids.length });
+  } catch (e) {
+    await conn.rollback();
+    console.error(e);
+    res.status(500).json({ message: 'Gagal update pesanan' });
+  } finally {
+    conn.release();
+  }
+});
+
 app.put('/api/orders/:id', authRequired, async (req, res) => {
   const conn = await pool.getConnection();
   try {
@@ -754,16 +1027,27 @@ app.delete('/api/orders/:id', authRequired, adminOnly, async (req, res) => {
   try {
     const prev = await getOrderById(conn, req.params.id);
     if (!prev) return res.status(404).json({ message: 'Order tidak ada' });
+    const [siblings] = await conn.query(
+      `SELECT * FROM orders
+       WHERE order_no = ? AND store_id = ? AND DATE(order_date) = DATE(?)`,
+      [prev.order_no, prev.store_id, prev.order_date]
+    );
     await conn.beginTransaction();
-    if (prev.product_id && shouldConsumeStock(prev.status)) {
-      await conn.query('UPDATE products SET stock = stock + ? WHERE id = ?', [
-        prev.qty,
-        prev.product_id,
-      ]);
+    for (const r of siblings) {
+      if (r.product_id && shouldConsumeStock(r.status)) {
+        await conn.query('UPDATE products SET stock = stock + ? WHERE id = ?', [
+          r.qty,
+          r.product_id,
+        ]);
+      }
     }
-    await conn.query('DELETE FROM orders WHERE id = ?', [req.params.id]);
+    const ids = siblings.map((r) => r.id);
+    await conn.query(
+      `DELETE FROM orders WHERE id IN (${ids.map(() => '?').join(',')})`,
+      ids
+    );
     await conn.commit();
-    res.json({ ok: true });
+    res.json({ ok: true, deleted: ids.length });
   } catch (e) {
     await conn.rollback();
     console.error(e);
