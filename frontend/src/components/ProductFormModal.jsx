@@ -14,11 +14,17 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
   const isEdit = productId != null;
   const [form, setForm] = useState(empty);
   const [loading, setLoading] = useState(false);
+  const [stockInQty, setStockInQty] = useState('');
+  const [stockInNotes, setStockInNotes] = useState('');
+  const [stockHistory, setStockHistory] = useState([]);
 
   useEffect(() => {
     if (!open) return;
     if (!isEdit) {
       setForm(empty);
+      setStockInQty('');
+      setStockInNotes('');
+      setStockHistory([]);
       return;
     }
     setLoading(true);
@@ -31,6 +37,10 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
           hpp: String(p.hpp),
           stock: p.stock,
         });
+        return api.get(`/api/products/${productId}/stock-in-history`);
+      })
+      .then(({ data }) => {
+        setStockHistory(Array.isArray(data) ? data : []);
       })
       .catch(() => {
         toastApiError(new Error('Produk tidak ada'));
@@ -46,6 +56,8 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
       barcode: form.barcode.trim() || null,
       hpp: Number(form.hpp) || 0,
       stock: Number(form.stock) || 0,
+      stock_in: isEdit ? Number(stockInQty) || 0 : 0,
+      stock_in_notes: isEdit ? stockInNotes.trim() || null : null,
     };
     try {
       if (isEdit) {
@@ -60,6 +72,8 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
         });
       }
       onSaved?.();
+      setStockInQty('');
+      setStockInNotes('');
       onClose();
     } catch {
       /* toast */
@@ -97,9 +111,78 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
             </div>
             <div>
               <label>Stok awal / koreksi</label>
-              <input type="number" min={0} value={form.stock} onChange={(e) => setForm((f) => ({ ...f, stock: e.target.value }))} />
+              <input
+                type="number"
+                min={0}
+                value={form.stock}
+                onChange={(e) => setForm((f) => ({ ...f, stock: e.target.value }))}
+                disabled={isEdit}
+              />
+              {isEdit && <p className="muted mt-1 text-xs">Untuk produk existing, gunakan &quot;Tambah stok masuk&quot;.</p>}
             </div>
+            {isEdit && (
+              <>
+                <div>
+                  <label>Tambah stok masuk</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={stockInQty}
+                    onChange={(e) => setStockInQty(e.target.value)}
+                    placeholder="Contoh: 10"
+                  />
+                </div>
+                <div>
+                  <label>Catatan stok masuk</label>
+                  <input
+                    value={stockInNotes}
+                    onChange={(e) => setStockInNotes(e.target.value)}
+                    placeholder="Opsional"
+                  />
+                </div>
+              </>
+            )}
           </div>
+          {isEdit && (
+            <div className="mt-4 rounded-lg border border-slate-200">
+              <div className="border-b border-slate-200 px-3 py-2 text-sm font-semibold text-slate-900">
+                History stok masuk
+              </div>
+              <div className="max-h-56 overflow-auto">
+                <table className="table-app">
+                  <thead>
+                    <tr>
+                      <th>Tanggal</th>
+                      <th>Masuk</th>
+                      <th>Stok awal</th>
+                      <th>Stok akhir</th>
+                      <th>Oleh</th>
+                      <th>Catatan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stockHistory.map((h) => (
+                      <tr key={h.id}>
+                        <td>{new Date(h.created_at).toLocaleString('id-ID')}</td>
+                        <td>{h.qty_added}</td>
+                        <td>{h.qty_before}</td>
+                        <td>{h.qty_after}</td>
+                        <td>{h.created_by_name || '—'}</td>
+                        <td>{h.notes || '—'}</td>
+                      </tr>
+                    ))}
+                    {!stockHistory.length && (
+                      <tr>
+                        <td colSpan={6} className="muted">
+                          Belum ada histori stok masuk
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
           <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
             <button type="submit" className="btn btn-primary">
               <Save size={18} strokeWidth={2} aria-hidden />

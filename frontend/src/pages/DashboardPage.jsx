@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import DatePicker, { registerLocale } from 'react-datepicker';
 import { format } from 'date-fns';
 import { id as localeId } from 'date-fns/locale/id';
-import { CalendarRange, ClipboardList, LayoutDashboard, PiggyBank, Store, TrendingUp } from 'lucide-react';
+import { CalendarRange, ClipboardList, LayoutDashboard, Package, PiggyBank, Store, TrendingUp } from 'lucide-react';
 import Select from 'react-select';
 import { api, toastApiError } from '../utils/api.js';
 import { selectStyles } from '../components/selectTheme.js';
@@ -119,7 +119,7 @@ export default function DashboardPage() {
 
       {dash && (
         <>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-3 mb-4">
+          <div className="grid grid-cols-1 gap-3 mb-4 md:grid-cols-5">
             <div className="stat">
               <div className="stat-icon bg-blue-50 text-blue-600">
                 <ClipboardList size={20} strokeWidth={2} aria-hidden />
@@ -135,11 +135,57 @@ export default function DashboardPage() {
               <strong>{formatMoney(dash.total_modal_nyangkut)}</strong>
             </div>
             <div className="stat">
+              <div className="stat-icon bg-amber-50 text-amber-600">
+                <PiggyBank size={20} strokeWidth={2} aria-hidden />
+              </div>
+              <span className="stat-label">Total modal stok</span>
+              <strong>{formatMoney(dash.total_modal_stok)}</strong>
+            </div>
+            <div className="stat">
+              <div className="stat-icon bg-indigo-50 text-indigo-600">
+                <Package size={20} strokeWidth={2} aria-hidden />
+              </div>
+              <span className="stat-label">Total stok (qty)</span>
+              <strong>{dash.total_stok_qty ?? 0}</strong>
+            </div>
+            <div className="stat">
               <div className="stat-icon bg-green-50 text-green-600">
                 <TrendingUp size={20} strokeWidth={2} aria-hidden />
               </div>
               <span className="stat-label">Laba bersih</span>
               <strong>{formatMoney(dash.laba_bersih)}</strong>
+            </div>
+          </div>
+
+          <div className="card mb-4">
+            <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-slate-900">
+              <TrendingUp size={18} strokeWidth={2} aria-hidden />
+              Top 5 produk paling sering keluar
+            </h2>
+            <div className="table-wrap">
+              <table className="table-app">
+                <thead>
+                  <tr>
+                    <th>Produk</th>
+                    <th>Qty keluar</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(dash.top_produk_keluar || []).map((p, i) => (
+                    <tr key={`${p.product_name}-${i}`}>
+                      <td>{p.product_name}</td>
+                      <td>{p.total_keluar}</td>
+                    </tr>
+                  ))}
+                  {!dash.top_produk_keluar?.length && (
+                    <tr>
+                      <td colSpan={2} className="muted">
+                        Belum ada data
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 

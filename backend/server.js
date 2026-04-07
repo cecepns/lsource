@@ -259,6 +259,25 @@ app.get('/api/products/:id', authRequired, async (req, res) => {
   res.json(rows[0]);
 });
 
+app.get('/api/products/:id/stock-in-history', authRequired, async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT h.id, h.product_id, h.qty_before, h.qty_added, h.qty_after, h.notes, h.created_at,
+              u.name AS created_by_name
+       FROM stock_in_history h
+       LEFT JOIN users u ON u.id = h.created_by
+       WHERE h.product_id = ?
+       ORDER BY h.id DESC
+       LIMIT 50`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: 'Gagal memuat histori stok masuk' });
+  }
+});
+
 app.post('/api/products', authRequired, async (req, res) => {
   try {
     const { name, barcode, hpp, stock } = req.body || {};
@@ -281,24 +300,57 @@ app.post('/api/products', authRequired, async (req, res) => {
 });
 
 app.put('/api/products/:id', authRequired, async (req, res) => {
+  const conn = await pool.getConnection();
   try {
-    const { name, barcode, hpp, stock } = req.body || {};
+    const { name, barcode, hpp, stock, stock_in, stock_in_notes } = req.body || {};
     if (!name?.trim())
       return res.status(400).json({ message: 'Nama produk wajib' });
-    await pool.query(
-      'UPDATE products SET name=?, barcode=?, hpp=?, stock=? WHERE id=?',
-      [
-        name.trim(),
-        barcode?.trim() || null,
-        Number(hpp) || 0,
-        Number(stock) || 0,
-        req.params.id,
-      ]
+
+    await conn.beginTransaction();
+    const [prows] = await conn.query(
+      'SELECT id, stock FROM products WHERE id = ? FOR UPDATE',
+      [req.params.id]
     );
+    const current = prows[0];
+    if (!current) {
+      await conn.rollback();
+      return res.status(404).json({ message: 'Produk tidak ada' });
+    }
+
+    const added = Number(stock_in) || 0;
+    let nextStock = Number(current.stock) || 0;
+    if (added > 0) nextStock += added;
+    else if (stock !== undefined && stock !== null) nextStock = Number(stock) || 0;
+
+    await conn.query(
+      'UPDATE products SET name=?, barcode=?, hpp=?, stock=? WHERE id=?',
+      [name.trim(), barcode?.trim() || null, Number(hpp) || 0, nextStock, req.params.id]
+    );
+
+    if (added > 0) {
+      await conn.query(
+        `INSERT INTO stock_in_history
+          (product_id, qty_before, qty_added, qty_after, notes, created_by)
+         VALUES (?,?,?,?,?,?)`,
+        [
+          req.params.id,
+          Number(current.stock) || 0,
+          added,
+          nextStock,
+          stock_in_notes?.trim() || null,
+          req.user?.id || null,
+        ]
+      );
+    }
+
+    await conn.commit();
     res.json({ ok: true });
   } catch (e) {
+    await conn.rollback();
     console.error(e);
     res.status(500).json({ message: 'Gagal update produk' });
+  } finally {
+    conn.release();
   }
 });
 
@@ -393,6 +445,7 @@ app.get('/api/orders/:id', authRequired, async (req, res) => {
       [row.order_no, row.store_id, row.order_date]
     );
     const first = siblings[0];
+    const groupNominalRow = siblings.find((r) => r.nominal_cair != null) || null;
     const items = siblings.map((r) => ({
       id: r.id,
       product_name: r.product_name,
@@ -400,7 +453,6 @@ app.get('/api/orders/:id', authRequired, async (req, res) => {
       qty: r.qty,
       selling_price: r.selling_price,
       product_id: r.product_id,
-      nominal_cair: r.nominal_cair,
     }));
     res.json({
       group_line_ids: siblings.map((r) => r.id),
@@ -410,6 +462,7 @@ app.get('/api/orders/:id', authRequired, async (req, res) => {
       store_name: first.store_name,
       order_date: orderDateKeyDb(first.order_date),
       status: first.status,
+      nominal_cair: groupNominalRow ? Number(groupNominalRow.nominal_cair) : null,
       notes: first.notes || '',
       items,
     });
@@ -503,7 +556,7 @@ app.get('/api/orders', authRequired, async (req, res) => {
            WHEN SUM(CASE WHEN o.nominal_cair IS NULL THEN 1 ELSE 0 END) = 0 THEN 'Sudah Cair'
            ELSE 'Sebagian cair'
          END AS payout_status_label,
-         SUM(IFNULL(o.nominal_cair,0)) AS nominal_cair_sum,
+         MAX(o.nominal_cair) AS nominal_cair_value,
          CASE
            WHEN SUM(CASE WHEN o.status != 'retur' AND o.nominal_cair IS NULL THEN 1 ELSE 0 END) > 0 THEN NULL
            ELSE SUM(
@@ -545,8 +598,8 @@ app.get('/api/orders', authRequired, async (req, res) => {
         products_label: row.products_label || '',
         status: row.status,
         payout_status_label: row.payout_status_label,
-        nominal_cair_sum:
-          row.nominal_cair_sum != null ? Number(row.nominal_cair_sum) : 0,
+        nominal_cair_value:
+          row.nominal_cair_value != null ? Number(row.nominal_cair_value) : null,
         laba: row.laba != null ? Number(row.laba) : null,
       };
     });
@@ -624,13 +677,14 @@ app.post('/api/orders', authRequired, orderUploadMaybe, async (req, res) => {
             });
           }
         }
-        const nominal_cair =
-          it.nominal_cair === '' ||
-          it.nominal_cair == null ||
-          it.nominal_cair === undefined
+        const groupNominal =
+          body.nominal_cair === '' ||
+          body.nominal_cair == null ||
+          body.nominal_cair === undefined
             ? null
-            : Number(it.nominal_cair);
-        const payout_at = nominal_cair != null ? new Date() : null;
+            : Number(body.nominal_cair);
+        const nominal_cair = i === 0 ? groupNominal : null;
+        const payout_at = i === 0 && nominal_cair != null ? new Date() : null;
         const rowAttachment = i === 0 ? attachment_path : null;
 
         const [ins] = await conn.query(
@@ -854,13 +908,14 @@ app.put('/api/orders/group', authRequired, async (req, res) => {
           });
         }
       }
-      const nominal_cair =
-        it.nominal_cair === '' ||
-        it.nominal_cair == null ||
-        it.nominal_cair === undefined
+      const groupNominal =
+        body.nominal_cair === '' ||
+        body.nominal_cair == null ||
+        body.nominal_cair === undefined
           ? null
-          : Number(it.nominal_cair);
-      const payout_at = nominal_cair != null ? new Date() : null;
+          : Number(body.nominal_cair);
+      const nominal_cair = i === 0 ? groupNominal : null;
+      const payout_at = i === 0 && nominal_cair != null ? new Date() : null;
       const rowAttachment = i === 0 ? firstAttachment : null;
 
       const [ins] = await conn.query(
@@ -1096,6 +1151,25 @@ app.get('/api/dashboard', authRequired, async (req, res) => {
       if (l != null) labaBersih += l;
     }
 
+    const [stokSummary] = await pool.query(
+      `SELECT
+        COALESCE(SUM(stock),0) AS total_stok_qty,
+        COALESCE(SUM(stock * hpp),0) AS total_modal_stok
+      FROM products`
+    );
+
+    const [topProduk] = await pool.query(
+      `SELECT
+        COALESCE(NULLIF(o.product_name,''), CONCAT('Produk #', o.product_id)) AS product_name,
+        SUM(o.qty) AS total_keluar
+      FROM orders o
+      WHERE ${oWhere} AND o.status != 'retur'
+      GROUP BY o.product_id, o.product_name
+      ORDER BY total_keluar DESC
+      LIMIT 5`,
+      params
+    );
+
     let storeList;
     if (store_id) {
       const [one] = await pool.query(
@@ -1152,6 +1226,12 @@ app.get('/api/dashboard', authRequired, async (req, res) => {
       total_order_belum_cair: belumCair[0].c,
       total_modal_nyangkut: Number(modalNyangkut[0].t),
       laba_bersih: labaBersih,
+      total_stok_qty: Number(stokSummary[0].total_stok_qty),
+      total_modal_stok: Number(stokSummary[0].total_modal_stok),
+      top_produk_keluar: topProduk.map((r) => ({
+        product_name: r.product_name || '-',
+        total_keluar: Number(r.total_keluar) || 0,
+      })),
       per_toko: perTokoLaba,
     });
   } catch (e) {

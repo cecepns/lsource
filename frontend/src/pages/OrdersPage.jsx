@@ -56,7 +56,7 @@ function formatDate(value) {
 /** Nominal cair di list grup: jika semua baris belum ada nominal, tampilkan — */
 function formatGroupNominalCair(o) {
   if (o.payout_status_label === 'Belum Cair') return '—';
-  return formatMoney(o.nominal_cair_sum);
+  return formatMoney(o.nominal_cair_value);
 }
 
 export default function OrdersPage() {
@@ -409,6 +409,12 @@ export default function OrdersPage() {
                   <OrderStatusBadge status={detailData.status} />
                 </div>
               </div>
+              <div>
+                <span className="muted text-xs">Nominal cair</span>
+                <div className="font-medium text-slate-900">
+                  {detailData.nominal_cair != null ? formatMoney(detailData.nominal_cair) : '—'}
+                </div>
+              </div>
             </div>
             {detailData.notes ? (
               <div>
@@ -428,7 +434,6 @@ export default function OrdersPage() {
                       <th>Variasi</th>
                       <th>Qty</th>
                       <th>Harga jual</th>
-                      <th>Nominal cair</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -438,9 +443,6 @@ export default function OrdersPage() {
                         <td>{it.variasi || '—'}</td>
                         <td className="tabular-nums">{it.qty}</td>
                         <td className="tabular-nums">{formatMoney(it.selling_price)}</td>
-                        <td className="tabular-nums">
-                          {it.nominal_cair != null ? formatMoney(it.nominal_cair) : '—'}
-                        </td>
                       </tr>
                     ))}
                   </tbody>

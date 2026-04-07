@@ -24,6 +24,7 @@ const emptyHeader = {
   store_id: null,
   order_date: new Date().toISOString().slice(0, 10),
   status: 'diproses',
+  nominal_cair: '',
   notes: '',
 };
 
@@ -33,7 +34,6 @@ const emptyLine = () => ({
   qty: 1,
   selling_price: '',
   product_id: null,
-  nominal_cair: '',
 });
 
 function productToOption(p) {
@@ -86,6 +86,10 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
           store_id: bundle.store_id,
           order_date: bundle.order_date?.slice?.(0, 10) || bundle.order_date,
           status: bundle.status,
+          nominal_cair:
+            bundle.nominal_cair != null && bundle.nominal_cair !== ''
+              ? String(bundle.nominal_cair)
+              : '',
           notes: bundle.notes || '',
         });
         const items = Array.isArray(bundle.items) ? bundle.items : [];
@@ -98,10 +102,6 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                 selling_price:
                   it.selling_price != null ? String(it.selling_price) : '',
                 product_id: it.product_id,
-                nominal_cair:
-                  it.nominal_cair != null && it.nominal_cair !== ''
-                    ? String(it.nominal_cair)
-                    : '',
               }))
             : [emptyLine()]
         );
@@ -180,10 +180,6 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
           qty: Number(l.qty) || 1,
           selling_price: Number(l.selling_price) || 0,
           product_id: l.product_id || null,
-          nominal_cair:
-            l.nominal_cair === '' || l.nominal_cair == null
-              ? null
-              : Number(l.nominal_cair),
         }));
         if (items.some((it) => !it.product_name)) {
           const { toast } = await import('sonner');
@@ -202,6 +198,10 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
           store_id: form.store_id,
           order_date: form.order_date,
           status: form.status,
+          nominal_cair:
+            form.nominal_cair === '' || form.nominal_cair == null
+              ? null
+              : Number(form.nominal_cair),
           notes: form.notes || null,
           items,
         };
@@ -216,8 +216,6 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
           qty: Number(l.qty) || 1,
           selling_price: Number(l.selling_price) || 0,
           product_id: l.product_id || null,
-          nominal_cair:
-            l.nominal_cair === '' || l.nominal_cair == null ? null : Number(l.nominal_cair),
         }));
         if (items.some((it) => !it.product_name)) {
           const { toast } = await import('sonner');
@@ -236,6 +234,10 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
           store_id: form.store_id,
           order_date: form.order_date,
           status: form.status,
+          nominal_cair:
+            form.nominal_cair === '' || form.nominal_cair == null
+              ? null
+              : Number(form.nominal_cair),
           notes: form.notes || null,
           items,
         };
@@ -325,6 +327,16 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
             <div>
               <label>Tanggal *</label>
               <input type="date" value={form.order_date} onChange={(e) => setField('order_date', e.target.value)} required />
+            </div>
+            <div>
+              <label>Nominal cair (1 pesanan / 1 resi)</label>
+              <input
+                type="number"
+                min={0}
+                value={form.nominal_cair}
+                onChange={(e) => setField('nominal_cair', e.target.value)}
+                placeholder="Kosong = belum cair"
+              />
             </div>
           </div>
 
@@ -434,16 +446,6 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                           min={0}
                           value={line.selling_price}
                           onChange={(e) => setLine(idx, { selling_price: e.target.value })}
-                        />
-                      </div>
-                      <div>
-                        <label>Nominal cair</label>
-                        <input
-                          type="number"
-                          min={0}
-                          value={line.nominal_cair}
-                          onChange={(e) => setLine(idx, { nominal_cair: e.target.value })}
-                          placeholder="Kosong = belum cair"
                         />
                       </div>
                     </div>
