@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncSelect from 'react-select/async';
 import { PackagePlus, Save } from 'lucide-react';
 import { api, apiCall } from '../utils/api.js';
 import { selectStyles } from '../components/selectTheme.js';
 
 const SEARCH_LIMIT = 20;
+/** Tunda panggilan API sampai user berhenti mengetik (kurangi request beruntun). */
+const SEARCH_DEBOUNCE_MS = 450;
 
 async function loadProductOptions(inputValue) {
   try {
@@ -27,6 +29,47 @@ export default function StockInPage() {
   const [qty, setQty] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const searchTimerRef = useRef(null);
+  const pendingSearchResolveRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      if (pendingSearchResolveRef.current) {
+        pendingSearchResolveRef.current([]);
+        pendingSearchResolveRef.current = null;
+      }
+    };
+  }, []);
+
+  const debouncedLoadProductOptions = useCallback((inputValue) => {
+    return new Promise((resolve) => {
+      if (pendingSearchResolveRef.current) {
+        pendingSearchResolveRef.current([]);
+        pendingSearchResolveRef.current = null;
+      }
+      if (searchTimerRef.current) {
+        clearTimeout(searchTimerRef.current);
+        searchTimerRef.current = null;
+      }
+
+      pendingSearchResolveRef.current = resolve;
+
+      searchTimerRef.current = setTimeout(async () => {
+        searchTimerRef.current = null;
+        const finish = pendingSearchResolveRef.current;
+        pendingSearchResolveRef.current = null;
+        if (!finish) return;
+        const q = inputValue ?? '';
+        try {
+          finish(await loadProductOptions(q));
+        } catch {
+          finish([]);
+        }
+      }, SEARCH_DEBOUNCE_MS);
+    });
+  }, []);
 
   async function onSubmit(e) {
     e.preventDefault();
@@ -79,13 +122,16 @@ export default function StockInPage() {
               styles={selectStyles()}
               value={selected}
               onChange={setSelected}
-              loadOptions={(input) => loadProductOptions(input)}
+              loadOptions={debouncedLoadProductOptions}
               noOptionsMessage={({ inputValue }) =>
-                inputValue ? 'Tidak ada hasil' : 'Ketik untuk mencari (maks. 20 produk)'
+                inputValue ? 'Tidak ada hasil (tunggu sebentar setelah mengetik…)' : 'Ketik untuk mencari (maks. 20 produk)'
               }
               loadingMessage={() => 'Memuat…'}
             />
-            <p className="muted mt-1 text-xs">Pencarian memakai API yang sama dengan daftar produk; hasil dibatasi {SEARCH_LIMIT} item.</p>
+            <p className="muted mt-1 text-xs">
+              Pencarian memakai API yang sama dengan daftar produk (maks. {SEARCH_LIMIT} item). Request dijeda{' '}
+              {SEARCH_DEBOUNCE_MS} ms setelah mengetik berhenti agar tidak boros.
+            </p>
           </div>
           <div>
             <label>Jumlah masuk *</label>
