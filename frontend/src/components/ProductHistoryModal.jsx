@@ -61,18 +61,20 @@ export default function ProductHistoryModal({ open, onClose, productId }) {
           {product && (
             <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
               {product.photo_url ? (
-                <img
-                  src={product.photo_url}
-                  alt={product.name}
-                  className="h-16 w-16 rounded-lg border border-slate-200 bg-white object-cover"
-                />
+                <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                  <img
+                    src={product.photo_url}
+                    alt={product.name}
+                    className="h-full w-full object-cover"
+                  />
+                </div>
               ) : (
-                <div className="flex h-16 w-16 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-xs text-slate-400">
+                <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-xs text-slate-400">
                   No Photo
                 </div>
               )}
-              <div className="min-w-0">
-                <div className="font-semibold text-slate-900">{product.name}</div>
+              <div className="min-w-0 flex-1">
+                <div className="break-words font-semibold leading-snug text-slate-900">{product.name}</div>
                 <div className="muted text-sm">{product.barcode || 'Tanpa barcode'}</div>
                 <div className="mt-1 text-sm text-slate-700">Stok saat ini: <strong>{Number(product.stock) || 0}</strong></div>
               </div>
