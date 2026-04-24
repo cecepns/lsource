@@ -7,6 +7,8 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
 import PaginationBar from '../components/PaginationBar.jsx';
 import ProductFormModal from '../components/ProductFormModal.jsx';
 import ProductHistoryModal from '../components/ProductHistoryModal.jsx';
+import ImagePreviewModal from '../components/ImagePreviewModal.jsx';
+import { toBackendUrl } from '../utils/endpoints.js';
 
 const LIMIT = 10;
 /** Stok di atas 0 dan di bawah ambang ini ditandai kuning (hampir habis). */
@@ -40,6 +42,9 @@ export default function ProductsPage() {
   const [productEditingId, setProductEditingId] = useState(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyProductId, setHistoryProductId] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewSrc, setPreviewSrc] = useState('');
+  const [previewTitle, setPreviewTitle] = useState('Preview gambar');
   /** '' = terbaru diubah; 'asc' | 'desc' = urut stok */
   const [stockSort, setStockSort] = useState('');
 
@@ -86,6 +91,17 @@ export default function ProductsPage() {
   function closeHistory() {
     setHistoryOpen(false);
     setHistoryProductId(null);
+  }
+
+  function openPreview(src, title) {
+    setPreviewSrc(src);
+    setPreviewTitle(title || 'Preview gambar');
+    setPreviewOpen(true);
+  }
+
+  function closePreview() {
+    setPreviewOpen(false);
+    setPreviewSrc('');
   }
 
   async function handleDelete(id) {
@@ -157,11 +173,13 @@ export default function ProductsPage() {
               <tr key={p.id}>
                 <td>
                   {p.photo_url ? (
-                    <img
-                      src={p.photo_url}
-                      alt={p.name}
-                      className="h-12 w-12 rounded-lg border border-slate-200 bg-white object-cover"
-                    />
+                    <button type="button" onClick={() => openPreview(toBackendUrl(p.photo_url), p.name)} className="block">
+                      <img
+                        src={toBackendUrl(p.photo_url)}
+                        alt={p.name}
+                        className="h-12 w-12 rounded-lg border border-slate-200 bg-white object-cover"
+                      />
+                    </button>
                   ) : (
                     <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-dashed border-slate-300 text-xs text-slate-400">
                       —
@@ -221,6 +239,7 @@ export default function ProductsPage() {
       />
 
       <ProductHistoryModal open={historyOpen} onClose={closeHistory} productId={historyProductId} />
+      <ImagePreviewModal open={previewOpen} onClose={closePreview} src={previewSrc} title={previewTitle} />
     </div>
   );
 }

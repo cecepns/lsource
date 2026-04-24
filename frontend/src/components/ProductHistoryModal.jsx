@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, toastApiError } from '../utils/api.js';
+import { toBackendUrl } from '../utils/endpoints.js';
 import Modal from './Modal.jsx';
+import ImagePreviewModal from './ImagePreviewModal.jsx';
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -35,6 +37,7 @@ export default function ProductHistoryModal({ open, onClose, productId }) {
   const [loading, setLoading] = useState(false);
   const [product, setProduct] = useState(null);
   const [rows, setRows] = useState([]);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     if (!open || !productId) return;
@@ -53,7 +56,8 @@ export default function ProductHistoryModal({ open, onClose, productId }) {
   }, [open, productId, onClose]);
 
   return (
-    <Modal open={open} onClose={onClose} title={product?.name ? `Histori ${product.name}` : 'Histori produk'} size="3xl">
+    <>
+      <Modal open={open} onClose={onClose} title={product?.name ? `Histori ${product.name}` : 'Histori produk'} size="3xl">
       {loading ? (
         <p className="muted py-8 text-center">Memuat histori…</p>
       ) : (
@@ -62,11 +66,17 @@ export default function ProductHistoryModal({ open, onClose, productId }) {
             <div className="flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
               {product.photo_url ? (
                 <div className="h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white">
-                  <img
-                    src={product.photo_url}
-                    alt={product.name}
-                    className="h-full w-full object-cover"
-                  />
+                  <button
+                    type="button"
+                    className="block h-full w-full"
+                    onClick={() => setPreviewOpen(true)}
+                  >
+                    <img
+                      src={toBackendUrl(product.photo_url)}
+                      alt={product.name}
+                      className="h-full w-full object-cover"
+                    />
+                  </button>
                 </div>
               ) : (
                 <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white text-xs text-slate-400">
@@ -116,6 +126,13 @@ export default function ProductHistoryModal({ open, onClose, productId }) {
           )}
         </div>
       )}
-    </Modal>
+      </Modal>
+      <ImagePreviewModal
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        src={product?.photo_url ? toBackendUrl(product.photo_url) : ''}
+        title={product?.name || 'Preview gambar'}
+      />
+    </>
   );
 }

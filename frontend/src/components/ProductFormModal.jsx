@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Save } from 'lucide-react';
 import Modal from './Modal.jsx';
 import { api, apiCall, toastApiError } from '../utils/api.js';
+import { toBackendUrl } from '../utils/endpoints.js';
+import ImagePreviewModal from './ImagePreviewModal.jsx';
 
 const empty = {
   name: '',
@@ -17,6 +19,7 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
   const [photoUrl, setPhotoUrl] = useState('');
   const [photoFile, setPhotoFile] = useState(null);
   const [removePhoto, setRemovePhoto] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const photoPreviewUrl = useMemo(
     () => (photoFile ? URL.createObjectURL(photoFile) : ''),
     [photoFile]
@@ -123,13 +126,17 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
                 <div className="mt-2 flex items-center gap-2">
                   <div className="h-12 w-12 overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
                     {photoFile ? (
-                      <img
-                        src={photoPreviewUrl}
-                        alt="Preview foto baru"
-                        className="h-full w-full object-cover"
-                      />
+                      <button type="button" className="block h-full w-full" onClick={() => setPreviewOpen(true)}>
+                        <img
+                          src={photoPreviewUrl}
+                          alt="Preview foto baru"
+                          className="h-full w-full object-cover"
+                        />
+                      </button>
                     ) : (
-                      <img src={photoUrl} alt={form.name || 'Foto produk'} className="h-full w-full object-cover" />
+                      <button type="button" className="block h-full w-full" onClick={() => setPreviewOpen(true)}>
+                        <img src={toBackendUrl(photoUrl)} alt={form.name || 'Foto produk'} className="h-full w-full object-cover" />
+                      </button>
                     )}
                   </div>
                   {isEdit && photoUrl && (
@@ -177,6 +184,12 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
           </div>
         </form>
       )}
+      <ImagePreviewModal
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        src={photoFile ? photoPreviewUrl : toBackendUrl(photoUrl)}
+        title={form.name || 'Preview gambar'}
+      />
     </Modal>
   );
 }
