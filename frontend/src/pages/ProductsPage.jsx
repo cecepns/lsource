@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
 import PaginationBar from '../components/PaginationBar.jsx';
 import ProductFormModal from '../components/ProductFormModal.jsx';
+import ProductHistoryModal from '../components/ProductHistoryModal.jsx';
 
 const LIMIT = 10;
 /** Stok di atas 0 dan di bawah ambang ini ditandai kuning (hampir habis). */
@@ -37,6 +38,8 @@ export default function ProductsPage() {
   const [total, setTotal] = useState(0);
   const [productModalOpen, setProductModalOpen] = useState(false);
   const [productEditingId, setProductEditingId] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyProductId, setHistoryProductId] = useState(null);
   /** '' = terbaru diubah; 'asc' | 'desc' = urut stok */
   const [stockSort, setStockSort] = useState('');
 
@@ -73,6 +76,16 @@ export default function ProductsPage() {
   function closeProductModal() {
     setProductModalOpen(false);
     setProductEditingId(null);
+  }
+
+  function openHistory(id) {
+    setHistoryProductId(id);
+    setHistoryOpen(true);
+  }
+
+  function closeHistory() {
+    setHistoryOpen(false);
+    setHistoryProductId(null);
   }
 
   async function handleDelete(id) {
@@ -131,6 +144,7 @@ export default function ProductsPage() {
         <table className="table-app">
           <thead>
             <tr>
+              <th>Foto</th>
               <th>Nama</th>
               <th>Barcode</th>
               <th>HPP</th>
@@ -142,10 +156,23 @@ export default function ProductsPage() {
             {rows.map((p) => (
               <tr key={p.id}>
                 <td>
+                  {p.photo_url ? (
+                    <img
+                      src={p.photo_url}
+                      alt={p.name}
+                      className="h-12 w-12 rounded-lg border border-slate-200 bg-white object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-dashed border-slate-300 text-xs text-slate-400">
+                      —
+                    </div>
+                  )}
+                </td>
+                <td>
                   <button
                     type="button"
                     className="text-left font-semibold text-blue-600 hover:underline"
-                    onClick={() => openEditProduct(p.id)}
+                    onClick={() => openHistory(p.id)}
                   >
                     {p.name}
                   </button>
@@ -192,6 +219,8 @@ export default function ProductsPage() {
         productId={productEditingId}
         onSaved={fetchProducts}
       />
+
+      <ProductHistoryModal open={historyOpen} onClose={closeHistory} productId={historyProductId} />
     </div>
   );
 }

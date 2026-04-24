@@ -437,6 +437,85 @@ app.get('/api/products/:id/stock-in-history', authRequired, async (req, res) => 
   }
 });
 
+app.get('/api/products/:id/stock-history', authRequired, async (req, res) => {
+  try {
+    const productId = Number(req.params.id);
+    if (!productId)
+      return res.status(400).json({ message: 'Produk tidak valid' });
+
+    const [products] = await pool.query(
+      'SELECT id, name, barcode, photo_url, stock, updated_at FROM products WHERE id = ? LIMIT 1',
+      [productId]
+    );
+    const product = products[0];
+    if (!product) return res.status(404).json({ message: 'Produk tidak ada' });
+
+    const [rows] = await pool.query(
+      `(
+        SELECT
+          'stock_out' AS type,
+          o.id AS ref_id,
+          o.created_at AS happened_at,
+          o.qty AS qty_delta,
+          o.order_no,
+          o.status AS order_status,
+          s.name AS store_name,
+          o.notes AS notes,
+          NULL AS created_by_name
+        FROM orders o
+        JOIN stores s ON s.id = o.store_id
+        WHERE o.product_id = ?
+      )
+      UNION ALL
+      (
+        SELECT
+          'stock_in' AS type,
+          h.id AS ref_id,
+          h.created_at AS happened_at,
+          h.qty_added AS qty_delta,
+          NULL AS order_no,
+          NULL AS order_status,
+          NULL AS store_name,
+          h.notes AS notes,
+          u.name AS created_by_name
+        FROM stock_in_history h
+        LEFT JOIN users u ON u.id = h.created_by
+        WHERE h.product_id = ?
+      )
+      UNION ALL
+      (
+        SELECT
+          'audit' AS type,
+          a.id AS ref_id,
+          a.created_at AS happened_at,
+          a.qty_delta AS qty_delta,
+          NULL AS order_no,
+          NULL AS order_status,
+          NULL AS store_name,
+          a.session_notes AS notes,
+          u.name AS created_by_name
+        FROM stock_audit_history a
+        LEFT JOIN users u ON u.id = a.created_by
+        WHERE a.product_id = ?
+      )
+      ORDER BY happened_at DESC, ref_id DESC
+      LIMIT 100`,
+      [productId, productId, productId]
+    );
+
+    res.json({
+      product,
+      history: rows.map((r) => ({
+        ...r,
+        qty_delta: Number(r.qty_delta) || 0,
+      })),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: 'Gagal memuat histori produk' });
+  }
+});
+
 app.get('/api/stock-in-history', authRequired, async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '' } = req.query;
@@ -474,16 +553,17 @@ app.get('/api/stock-in-history', authRequired, async (req, res) => {
 
 app.post('/api/products', authRequired, async (req, res) => {
   try {
-    const { name, barcode, hpp, stock } = req.body || {};
+    const { name, barcode, hpp, stock, photo_url } = req.body || {};
     if (!name?.trim())
       return res.status(400).json({ message: 'Nama produk wajib' });
     const [r] = await pool.query(
-      'INSERT INTO products (name, barcode, hpp, stock) VALUES (?,?,?,?)',
+      'INSERT INTO products (name, barcode, hpp, stock, photo_url) VALUES (?,?,?,?,?)',
       [
         name.trim(),
         barcode?.trim() || null,
         Number(hpp) || 0,
         Number(stock) || 0,
+        photo_url?.trim() || null,
       ]
     );
     res.status(201).json({ id: r.insertId });
@@ -496,7 +576,7 @@ app.post('/api/products', authRequired, async (req, res) => {
 app.put('/api/products/:id', authRequired, async (req, res) => {
   const conn = await pool.getConnection();
   try {
-    const { name, barcode, hpp, stock, stock_in, stock_in_notes } = req.body || {};
+    const { name, barcode, hpp, stock, stock_in, stock_in_notes, photo_url } = req.body || {};
     if (!name?.trim())
       return res.status(400).json({ message: 'Nama produk wajib' });
 
@@ -517,8 +597,8 @@ app.put('/api/products/:id', authRequired, async (req, res) => {
     else if (stock !== undefined && stock !== null) nextStock = Number(stock) || 0;
 
     await conn.query(
-      'UPDATE products SET name=?, barcode=?, hpp=?, stock=? WHERE id=?',
-      [name.trim(), barcode?.trim() || null, Number(hpp) || 0, nextStock, req.params.id]
+      'UPDATE products SET name=?, barcode=?, hpp=?, stock=?, photo_url=? WHERE id=?',
+      [name.trim(), barcode?.trim() || null, Number(hpp) || 0, nextStock, photo_url?.trim() || null, req.params.id]
     );
 
     if (added > 0) {
@@ -752,11 +832,13 @@ app.get('/api/orders', authRequired, async (req, res) => {
          END AS payout_status_label,
          MAX(o.nominal_cair) AS nominal_cair_value,
          CASE
-           WHEN SUM(CASE WHEN o.status != 'retur' AND o.nominal_cair IS NULL THEN 1 ELSE 0 END) > 0 THEN NULL
+           WHEN SUM(CASE WHEN o.nominal_cair IS NOT NULL THEN 1 ELSE 0 END) = 0
+             AND SUM(CASE WHEN o.status = 'retur' THEN 1 ELSE 0 END) = 0
+             THEN NULL
            ELSE SUM(
              CASE
                WHEN o.status = 'retur' THEN LEAST(0, IFNULL(o.nominal_cair,0) - o.qty * o.hpp_snapshot)
-               ELSE o.nominal_cair - o.qty * o.hpp_snapshot
+               ELSE IFNULL(o.nominal_cair, 0) - o.qty * o.hpp_snapshot
              END
            )
          END AS laba

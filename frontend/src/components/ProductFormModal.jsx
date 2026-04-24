@@ -6,6 +6,7 @@ import { api, apiCall, toastApiError } from '../utils/api.js';
 const empty = {
   name: '',
   barcode: '',
+  photo_url: '',
   hpp: '',
   stock: 0,
 };
@@ -27,6 +28,7 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
         setForm({
           name: p.name,
           barcode: p.barcode || '',
+          photo_url: p.photo_url || '',
           hpp: String(p.hpp),
           stock: p.stock,
         });
@@ -43,6 +45,7 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
     const payload = {
       name: form.name.trim(),
       barcode: form.barcode.trim() || null,
+      photo_url: form.photo_url.trim() || null,
       hpp: Number(form.hpp) || 0,
       stock: Number(form.stock) || 0,
     };
@@ -88,6 +91,15 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
                 value={form.barcode}
                 onChange={(e) => setForm((f) => ({ ...f, barcode: e.target.value }))}
                 placeholder="Untuk scan cepat"
+              />
+            </div>
+            <div>
+              <label>URL foto</label>
+              <input
+                type="url"
+                value={form.photo_url}
+                onChange={(e) => setForm((f) => ({ ...f, photo_url: e.target.value }))}
+                placeholder="https://..."
               />
             </div>
             <div>
