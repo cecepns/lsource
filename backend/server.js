@@ -52,6 +52,27 @@ function orderUploadMaybe(req, res, next) {
   next();
 }
 
+function removeUploadedFile(filePath) {
+  if (!filePath) return;
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch {
+    // best effort cleanup
+  }
+}
+
+function productPhotoUploadMaybe(req, res, next) {
+  if (!req.is('multipart/form-data')) return next();
+  return upload.single('photo')(req, res, (err) => {
+    if (err) return next(err);
+    if (req.file && !String(req.file.mimetype || '').startsWith('image/')) {
+      removeUploadedFile(req.file.path);
+      return res.status(400).json({ message: 'File foto harus berupa gambar' });
+    }
+    next();
+  });
+}
+
 function paginate(page, limit = 10) {
   const p = Math.max(1, parseInt(String(page), 10) || 1);
   const l = Math.min(100, Math.max(1, parseInt(String(limit), 10) || 10));
@@ -551,11 +572,14 @@ app.get('/api/stock-in-history', authRequired, async (req, res) => {
   }
 });
 
-app.post('/api/products', authRequired, async (req, res) => {
+app.post('/api/products', authRequired, productPhotoUploadMaybe, async (req, res) => {
   try {
-    const { name, barcode, hpp, stock, photo_url } = req.body || {};
-    if (!name?.trim())
+    const { name, barcode, hpp, stock } = req.body || {};
+    const photoPath = req.file ? `/uploads/${req.file.filename}` : null;
+    if (!name?.trim()) {
+      if (req.file) removeUploadedFile(req.file.path);
       return res.status(400).json({ message: 'Nama produk wajib' });
+    }
     const [r] = await pool.query(
       'INSERT INTO products (name, barcode, hpp, stock, photo_url) VALUES (?,?,?,?,?)',
       [
@@ -563,26 +587,29 @@ app.post('/api/products', authRequired, async (req, res) => {
         barcode?.trim() || null,
         Number(hpp) || 0,
         Number(stock) || 0,
-        photo_url?.trim() || null,
+        photoPath,
       ]
     );
     res.status(201).json({ id: r.insertId });
   } catch (e) {
+    if (req.file) removeUploadedFile(req.file.path);
     console.error(e);
     res.status(500).json({ message: 'Gagal simpan produk' });
   }
 });
 
-app.put('/api/products/:id', authRequired, async (req, res) => {
+app.put('/api/products/:id', authRequired, productPhotoUploadMaybe, async (req, res) => {
   const conn = await pool.getConnection();
   try {
-    const { name, barcode, hpp, stock, stock_in, stock_in_notes, photo_url } = req.body || {};
-    if (!name?.trim())
+    const { name, barcode, hpp, stock, stock_in, stock_in_notes, remove_photo } = req.body || {};
+    if (!name?.trim()) {
+      if (req.file) removeUploadedFile(req.file.path);
       return res.status(400).json({ message: 'Nama produk wajib' });
+    }
 
     await conn.beginTransaction();
     const [prows] = await conn.query(
-      'SELECT id, stock FROM products WHERE id = ? FOR UPDATE',
+      'SELECT id, stock, photo_url FROM products WHERE id = ? FOR UPDATE',
       [req.params.id]
     );
     const current = prows[0];
@@ -596,9 +623,14 @@ app.put('/api/products/:id', authRequired, async (req, res) => {
     if (added > 0) nextStock += added;
     else if (stock !== undefined && stock !== null) nextStock = Number(stock) || 0;
 
+    const shouldRemovePhoto = String(remove_photo || '') === '1';
+    let nextPhotoUrl = current.photo_url || null;
+    if (req.file) nextPhotoUrl = `/uploads/${req.file.filename}`;
+    else if (shouldRemovePhoto) nextPhotoUrl = null;
+
     await conn.query(
       'UPDATE products SET name=?, barcode=?, hpp=?, stock=?, photo_url=? WHERE id=?',
-      [name.trim(), barcode?.trim() || null, Number(hpp) || 0, nextStock, photo_url?.trim() || null, req.params.id]
+      [name.trim(), barcode?.trim() || null, Number(hpp) || 0, nextStock, nextPhotoUrl, req.params.id]
     );
 
     if (added > 0) {
@@ -618,8 +650,16 @@ app.put('/api/products/:id', authRequired, async (req, res) => {
     }
 
     await conn.commit();
+    if (
+      (req.file || shouldRemovePhoto) &&
+      current.photo_url &&
+      current.photo_url.startsWith('/uploads/')
+    ) {
+      removeUploadedFile(path.join(UPLOAD_DIR, path.basename(current.photo_url)));
+    }
     res.json({ ok: true });
   } catch (e) {
+    if (req.file) removeUploadedFile(req.file.path);
     await conn.rollback();
     console.error(e);
     res.status(500).json({ message: 'Gagal update produk' });
@@ -629,8 +669,23 @@ app.put('/api/products/:id', authRequired, async (req, res) => {
 });
 
 app.delete('/api/products/:id', authRequired, adminOnly, async (req, res) => {
-  await pool.query('DELETE FROM products WHERE id = ?', [req.params.id]);
-  res.json({ ok: true });
+  try {
+    const [rows] = await pool.query(
+      'SELECT photo_url FROM products WHERE id = ? LIMIT 1',
+      [req.params.id]
+    );
+    const product = rows[0];
+    if (!product) return res.status(404).json({ message: 'Produk tidak ada' });
+
+    await pool.query('DELETE FROM products WHERE id = ?', [req.params.id]);
+    if (product.photo_url && product.photo_url.startsWith('/uploads/')) {
+      removeUploadedFile(path.join(UPLOAD_DIR, path.basename(product.photo_url)));
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: 'Gagal hapus produk (mungkin masih dipakai)' });
+  }
 });
 
 /* ——— Stock helpers ——— */

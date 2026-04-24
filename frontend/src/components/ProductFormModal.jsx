@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Save } from 'lucide-react';
 import Modal from './Modal.jsx';
 import { api, apiCall, toastApiError } from '../utils/api.js';
@@ -6,7 +6,6 @@ import { api, apiCall, toastApiError } from '../utils/api.js';
 const empty = {
   name: '',
   barcode: '',
-  photo_url: '',
   hpp: '',
   stock: 0,
 };
@@ -15,10 +14,26 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
   const isEdit = productId != null;
   const [form, setForm] = useState(empty);
   const [loading, setLoading] = useState(false);
+  const [photoUrl, setPhotoUrl] = useState('');
+  const [photoFile, setPhotoFile] = useState(null);
+  const [removePhoto, setRemovePhoto] = useState(false);
+  const photoPreviewUrl = useMemo(
+    () => (photoFile ? URL.createObjectURL(photoFile) : ''),
+    [photoFile]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    };
+  }, [photoPreviewUrl]);
   useEffect(() => {
     if (!open) return;
+    setPhotoFile(null);
+    setRemovePhoto(false);
     if (!isEdit) {
       setForm(empty);
+      setPhotoUrl('');
       return;
     }
     setLoading(true);
@@ -28,10 +43,10 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
         setForm({
           name: p.name,
           barcode: p.barcode || '',
-          photo_url: p.photo_url || '',
           hpp: String(p.hpp),
           stock: p.stock,
         });
+        setPhotoUrl(p.photo_url || '');
       })
       .catch(() => {
         toastApiError(new Error('Produk tidak ada'));
@@ -42,21 +57,21 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
 
   async function onSubmit(e) {
     e.preventDefault();
-    const payload = {
-      name: form.name.trim(),
-      barcode: form.barcode.trim() || null,
-      photo_url: form.photo_url.trim() || null,
-      hpp: Number(form.hpp) || 0,
-      stock: Number(form.stock) || 0,
-    };
+    const payload = new FormData();
+    payload.append('name', form.name.trim());
+    payload.append('barcode', form.barcode.trim());
+    payload.append('hpp', String(Number(form.hpp) || 0));
+    payload.append('stock', String(Number(form.stock) || 0));
+    if (photoFile) payload.append('photo', photoFile);
+    if (removePhoto) payload.append('remove_photo', '1');
     try {
       if (isEdit) {
-        await apiCall(api.put(`/api/products/${productId}`, payload), {
+        await apiCall(api.put(`/api/products/${productId}`, payload, { headers: { 'Content-Type': 'multipart/form-data' } }), {
           success: 'Produk diperbarui',
           loading: 'Menyimpan…',
         });
       } else {
-        await apiCall(api.post('/api/products', payload), {
+        await apiCall(api.post('/api/products', payload, { headers: { 'Content-Type': 'multipart/form-data' } }), {
           success: 'Produk disimpan',
           loading: 'Menyimpan…',
         });
@@ -94,13 +109,42 @@ export default function ProductFormModal({ open, onClose, productId, onSaved }) 
               />
             </div>
             <div>
-              <label>URL foto</label>
+              <label>Foto produk</label>
               <input
-                type="url"
-                value={form.photo_url}
-                onChange={(e) => setForm((f) => ({ ...f, photo_url: e.target.value }))}
-                placeholder="https://..."
+                type="file"
+                accept="image/*"
+                onChange={(e) => {
+                  const f = e.target.files?.[0] || null;
+                  setPhotoFile(f);
+                  if (f) setRemovePhoto(false);
+                }}
               />
+              {(photoFile || photoUrl) && (
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="h-12 w-12 overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                    {photoFile ? (
+                      <img
+                        src={photoPreviewUrl}
+                        alt="Preview foto baru"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <img src={photoUrl} alt={form.name || 'Foto produk'} className="h-full w-full object-cover" />
+                    )}
+                  </div>
+                  {isEdit && photoUrl && (
+                    <label className="inline-flex items-center gap-2 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={removePhoto}
+                        onChange={(e) => setRemovePhoto(e.target.checked)}
+                        disabled={!!photoFile}
+                      />
+                      Hapus foto saat simpan
+                    </label>
+                  )}
+                </div>
+              )}
             </div>
             <div>
               <label>HPP (modal per unit) *</label>
