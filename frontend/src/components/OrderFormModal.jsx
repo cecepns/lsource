@@ -3,6 +3,7 @@ import { Plus, Save, Trash2 } from 'lucide-react';
 import Select from 'react-select';
 import Modal from './Modal.jsx';
 import { api, apiCall, toastApiError } from '../utils/api.js';
+import { toBackendUrl } from '../utils/endpoints.js';
 import { selectStyles } from './selectTheme.js';
 
 /** Menu select produk di portal agar tidak terpotong overflow modal (z di atas dialog). */
@@ -46,6 +47,22 @@ function productToOption(p) {
     label: bits.join(' · '),
     raw: p,
   };
+}
+
+function renderProductOptionLabel(option) {
+  const photoUrl = option?.raw?.photo_url ? toBackendUrl(option.raw.photo_url) : '';
+  return (
+    <div className="flex items-center gap-2">
+      {photoUrl ? (
+        <img
+          src={photoUrl}
+          alt={option?.raw?.name || option.label}
+          className="h-7 w-7 rounded-md border border-slate-200 bg-white object-cover"
+        />
+      ) : null}
+      <span className="truncate">{option.label}</span>
+    </div>
+  );
 }
 
 export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
@@ -386,6 +403,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                             isClearable
                             placeholder="Ketik nama atau barcode…"
                             options={productOptions}
+                            formatOptionLabel={renderProductOptionLabel}
                             onInputChange={handleProductInputChange}
                             onMenuOpen={() => {
                               void loadProductsBySearch('');
