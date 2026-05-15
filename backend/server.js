@@ -92,6 +92,14 @@ function labaForRow(row) {
   return nc - modal;
 }
 
+/** HPP snapshot baris order — karyawan tidak boleh mengubah HPP manual. */
+function orderLineHppSnapshot(role, it, { productHpp, prevRow } = {}) {
+  if (productHpp != null) return Number(productHpp) || 0;
+  if (role === 'karyawan')
+    return prevRow != null ? Number(prevRow.hpp_snapshot) || 0 : 0;
+  return Number(it.hpp_snapshot) || 0;
+}
+
 /** Kunci grup pesanan (satu tampilan list) — samakan dengan GROUP BY list. */
 function orderDateKeyDb(v) {
   if (!v) return '';
@@ -624,7 +632,7 @@ app.put('/api/products/:id', authRequired, staffExceptChecker, productPhotoUploa
 
     await conn.beginTransaction();
     const [prows] = await conn.query(
-      'SELECT id, stock, photo_url FROM products WHERE id = ? FOR UPDATE',
+      'SELECT id, stock, photo_url, hpp FROM products WHERE id = ? FOR UPDATE',
       [req.params.id]
     );
     const current = prows[0];
@@ -643,9 +651,13 @@ app.put('/api/products/:id', authRequired, staffExceptChecker, productPhotoUploa
     if (req.file) nextPhotoUrl = `/uploads/${req.file.filename}`;
     else if (shouldRemovePhoto) nextPhotoUrl = null;
 
+    const role = req.user?.role;
+    const nextHpp =
+      role === 'karyawan' ? Number(current.hpp) || 0 : Number(hpp) || 0;
+
     await conn.query(
       'UPDATE products SET name=?, barcode=?, hpp=?, stock=?, photo_url=? WHERE id=?',
-      [name.trim(), barcode?.trim() || null, Number(hpp) || 0, nextStock, nextPhotoUrl, req.params.id]
+      [name.trim(), barcode?.trim() || null, nextHpp, nextStock, nextPhotoUrl, req.params.id]
     );
 
     if (added > 0) {
@@ -1019,6 +1031,7 @@ app.get('/api/orders/:id', authRequired, staffExceptChecker, async (req, res) =>
       qty: r.qty,
       selling_price: r.selling_price,
       product_id: r.product_id,
+      hpp_snapshot: Number(r.hpp_snapshot) || 0,
     }));
     res.json({
       group_line_ids: siblings.map((r) => r.id),
@@ -1243,7 +1256,7 @@ app.post('/api/orders', authRequired, staffExceptChecker, orderUploadMaybe, asyn
           });
         }
         let product_id = it.product_id ? Number(it.product_id) : null;
-        let hpp_snapshot = Number(it.hpp_snapshot) || 0;
+        let productHpp = null;
         if (product_id) {
           const [prows] = await conn.query(
             'SELECT hpp, stock FROM products WHERE id = ? FOR UPDATE',
@@ -1256,7 +1269,7 @@ app.post('/api/orders', authRequired, staffExceptChecker, orderUploadMaybe, asyn
               message: `Baris ${i + 1}: produk tidak ditemukan`,
             });
           }
-          hpp_snapshot = Number(pr.hpp);
+          productHpp = Number(pr.hpp);
           if (shouldConsumeStock(stat) && pr.stock < qty) {
             await conn.rollback();
             return res.status(400).json({
@@ -1264,6 +1277,7 @@ app.post('/api/orders', authRequired, staffExceptChecker, orderUploadMaybe, asyn
             });
           }
         }
+        const hpp_snapshot = orderLineHppSnapshot(req.user?.role, it, { productHpp });
         const groupNominal =
           body.nominal_cair === '' ||
           body.nominal_cair == null ||
@@ -1318,9 +1332,9 @@ app.post('/api/orders', authRequired, staffExceptChecker, orderUploadMaybe, asyn
         .status(400)
         .json({ message: 'No pesanan, produk, toko, dan tanggal wajib' });
 
-    let hpp_snapshot = Number(body.hpp_snapshot) || 0;
     let product_id = body.product_id ? Number(body.product_id) : null;
     const stat = body.status || 'diproses';
+    let productHpp = null;
 
     if (product_id) {
       const [prows] = await conn.query(
@@ -1329,7 +1343,7 @@ app.post('/api/orders', authRequired, staffExceptChecker, orderUploadMaybe, asyn
       );
       const pr = prows[0];
       if (!pr) return res.status(400).json({ message: 'Produk tidak ditemukan' });
-      hpp_snapshot = Number(pr.hpp);
+      productHpp = Number(pr.hpp);
       const qty = Number(body.qty) || 1;
       if (shouldConsumeStock(stat) && pr.stock < qty)
         return res.status(400).json({ message: 'Stok produk tidak cukup' });
@@ -1349,6 +1363,7 @@ app.post('/api/orders', authRequired, staffExceptChecker, orderUploadMaybe, asyn
         message: 'Nominal cair hanya bisa diisi setelah status Dikirim',
       });
     const payout_at = nominal_cair != null ? new Date() : null;
+    const hpp_snapshot = orderLineHppSnapshot(role, body, { productHpp });
 
     const attachment_path = req.file ? `/uploads/${req.file.filename}` : null;
 
@@ -1485,7 +1500,7 @@ app.put('/api/orders/group', authRequired, staffExceptChecker, async (req, res) 
       const product_name = it.product_name.trim();
       const qty = Number(it.qty) || 1;
       let product_id = it.product_id ? Number(it.product_id) : null;
-      let hpp_snapshot = Number(it.hpp_snapshot) || 0;
+      let productHpp = null;
       if (product_id) {
         const [prows] = await conn.query(
           'SELECT hpp, stock FROM products WHERE id = ? FOR UPDATE',
@@ -1498,7 +1513,7 @@ app.put('/api/orders/group', authRequired, staffExceptChecker, async (req, res) 
             message: `Baris ${i + 1}: produk tidak ditemukan`,
           });
         }
-        hpp_snapshot = Number(pr.hpp);
+        productHpp = Number(pr.hpp);
         if (shouldConsumeStock(stat) && pr.stock < qty) {
           await conn.rollback();
           return res.status(400).json({
@@ -1506,6 +1521,10 @@ app.put('/api/orders/group', authRequired, staffExceptChecker, async (req, res) 
           });
         }
       }
+      const hpp_snapshot = orderLineHppSnapshot(req.user?.role, it, {
+        productHpp,
+        prevRow: sorted[i],
+      });
       const groupNominal =
         body.nominal_cair === '' ||
         body.nominal_cair == null ||
@@ -1574,11 +1593,7 @@ app.put('/api/orders/:id', authRequired, staffExceptChecker, async (req, res) =>
           ? Number(body.product_id)
           : null
         : prev.product_id;
-    let hpp_snapshot =
-      body.hpp_snapshot != null
-        ? Number(body.hpp_snapshot)
-        : Number(prev.hpp_snapshot);
-
+    let productHpp = null;
     if (product_id) {
       const [prows] = await conn.query(
         'SELECT hpp, stock FROM products WHERE id = ? FOR UPDATE',
@@ -1586,8 +1601,12 @@ app.put('/api/orders/:id', authRequired, staffExceptChecker, async (req, res) =>
       );
       const pr = prows[0];
       if (!pr) return res.status(400).json({ message: 'Produk tidak ditemukan' });
-      hpp_snapshot = Number(pr.hpp);
+      productHpp = Number(pr.hpp);
     }
+    const hpp_snapshot = orderLineHppSnapshot(req.user?.role, body, {
+      productHpp,
+      prevRow: prev,
+    });
 
     const nominal_cair =
       body.nominal_cair === '' || body.nominal_cair === undefined
@@ -1910,6 +1929,46 @@ app.get('/api/users', authRequired, staffExceptChecker, ownerOnly, async (req, r
     [q, q, l, offset]
   );
   res.json({ data: rows, page: p, limit: l, total: c[0].c });
+});
+
+app.put('/api/users/:id', authRequired, staffExceptChecker, ownerOnly, async (req, res) => {
+  const { name, email, password, role } = req.body || {};
+  if (!name?.trim() || !email?.trim())
+    return res.status(400).json({ message: 'Nama dan email wajib' });
+
+  const allowed = new Set(['owner', 'admin', 'karyawan', 'checker_pengiriman']);
+  let r = String(role || 'karyawan').trim();
+  if (!allowed.has(r)) r = 'karyawan';
+
+  if (String(req.params.id) === String(req.user.id) && r !== req.user.role)
+    return res.status(400).json({ message: 'Tidak bisa mengubah role akun sendiri' });
+
+  const [existing] = await pool.query(
+    'SELECT id, email FROM users WHERE id = ? LIMIT 1',
+    [req.params.id]
+  );
+  if (!existing[0]) return res.status(404).json({ message: 'User tidak ditemukan' });
+
+  const emailNorm = String(email).trim().toLowerCase();
+  const sets = ['name = ?', 'email = ?', 'role = ?'];
+  const params = [name.trim(), emailNorm, r];
+
+  if (password != null && String(password).trim() !== '') {
+    const hash = await bcrypt.hash(String(password), 10);
+    sets.push('password_hash = ?');
+    params.push(hash);
+  }
+
+  params.push(req.params.id);
+
+  try {
+    await pool.query(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, params);
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.code === 'ER_DUP_ENTRY')
+      return res.status(400).json({ message: 'Email sudah terdaftar' });
+    throw e;
+  }
 });
 
 app.post('/api/users', authRequired, staffExceptChecker, ownerOnly, async (req, res) => {

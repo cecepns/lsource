@@ -41,6 +41,7 @@ const emptyLine = () => ({
   variasi: '',
   qty: 1,
   selling_price: '',
+  hpp_snapshot: '',
   product_id: null,
 });
 
@@ -74,7 +75,8 @@ function renderProductOptionLabel(option) {
 
 export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
   const isEdit = orderId != null;
-  const { isOwner, isAdmin, isKaryawan } = useAuth();
+  const { isOwner, isAdmin, isKaryawan, isOwnerOrAdmin } = useAuth();
+  const canEditHpp = isOwnerOrAdmin;
   const [stores, setStores] = useState([]);
   const [form, setForm] = useState(emptyHeader);
   const [lines, setLines] = useState([emptyLine()]);
@@ -130,6 +132,8 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                 qty: it.qty,
                 selling_price:
                   it.selling_price != null ? String(it.selling_price) : '',
+                hpp_snapshot:
+                  it.hpp_snapshot != null ? String(it.hpp_snapshot) : '',
                 product_id: it.product_id,
               }))
             : [emptyLine()]
@@ -233,13 +237,18 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
           toast.error('Data pesanan tidak valid. Tutup dan buka lagi dari daftar.');
           return;
         }
-        const items = lines.map((l) => ({
-          product_name: l.product_name.trim(),
-          variasi: l.variasi?.trim() || null,
-          qty: Number(l.qty) || 1,
-          selling_price: Number(l.selling_price) || 0,
-          product_id: l.product_id || null,
-        }));
+        const items = lines.map((l) => {
+          const row = {
+            product_name: l.product_name.trim(),
+            variasi: l.variasi?.trim() || null,
+            qty: Number(l.qty) || 1,
+            selling_price: Number(l.selling_price) || 0,
+            product_id: l.product_id || null,
+          };
+          if (canEditHpp && !row.product_id)
+            row.hpp_snapshot = Number(l.hpp_snapshot) || 0;
+          return row;
+        });
         if (items.some((it) => !it.product_name)) {
           const { toast } = await import('sonner');
           toast.error('Setiap baris produk wajib punya nama');
@@ -269,13 +278,18 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
           loading: 'Menyimpan…',
         });
       } else {
-        const items = lines.map((l) => ({
-          product_name: l.product_name.trim(),
-          variasi: l.variasi?.trim() || null,
-          qty: Number(l.qty) || 1,
-          selling_price: Number(l.selling_price) || 0,
-          product_id: l.product_id || null,
-        }));
+        const items = lines.map((l) => {
+          const row = {
+            product_name: l.product_name.trim(),
+            variasi: l.variasi?.trim() || null,
+            qty: Number(l.qty) || 1,
+            selling_price: Number(l.selling_price) || 0,
+            product_id: l.product_id || null,
+          };
+          if (canEditHpp && !row.product_id)
+            row.hpp_snapshot = Number(l.hpp_snapshot) || 0;
+          return row;
+        });
         if (items.some((it) => !it.product_name)) {
           const { toast } = await import('sonner');
           toast.error('Setiap baris produk wajib punya nama');
@@ -496,6 +510,8 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                               setLine(idx, {
                                 product_id: o?.value ?? null,
                                 product_name: raw?.name ?? line.product_name,
+                                hpp_snapshot:
+                                  raw?.hpp != null ? String(raw.hpp) : line.hpp_snapshot,
                               });
                             }}
                             styles={productSelectStyles}
@@ -539,6 +555,32 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                           onChange={(e) => setLine(idx, { selling_price: e.target.value })}
                           disabled={lineLock || fullFormLock}
                         />
+                      </div>
+                      <div>
+                        <label>HPP (modal per unit)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={line.hpp_snapshot}
+                          onChange={(e) => setLine(idx, { hpp_snapshot: e.target.value })}
+                          disabled={
+                            lineLock ||
+                            fullFormLock ||
+                            !canEditHpp ||
+                            !!line.product_id
+                          }
+                          readOnly={!canEditHpp || !!line.product_id}
+                        />
+                        {!canEditHpp && (
+                          <p className="muted mt-1 text-xs">
+                            HPP hanya dapat diubah oleh admin atau owner.
+                          </p>
+                        )}
+                        {canEditHpp && line.product_id && (
+                          <p className="muted mt-1 text-xs">
+                            Mengikuti HPP produk terhubung.
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>

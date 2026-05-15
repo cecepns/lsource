@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { UserPlus } from 'lucide-react';
+import { Save, UserPlus } from 'lucide-react';
 import Select from 'react-select';
 import Modal from './Modal.jsx';
 import { api, apiCall } from '../utils/api.js';
@@ -14,20 +14,44 @@ const roleOptions = [
 
 const empty = { name: '', email: '', password: '', role: 'karyawan' };
 
-export default function UserFormModal({ open, onClose, onSaved }) {
+export default function UserFormModal({ open, onClose, editingUser, onSaved }) {
+  const isEdit = editingUser != null;
   const [form, setForm] = useState(empty);
 
   useEffect(() => {
-    if (open) setForm(empty);
-  }, [open]);
+    if (!open) return;
+    if (isEdit) {
+      setForm({
+        name: editingUser.name || '',
+        email: editingUser.email || '',
+        password: '',
+        role: editingUser.role || 'karyawan',
+      });
+    } else {
+      setForm(empty);
+    }
+  }, [open, isEdit, editingUser]);
 
   async function onSubmit(e) {
     e.preventDefault();
     try {
-      await apiCall(api.post('/api/users', form), {
-        success: 'User ditambah',
-        loading: 'Menyimpan…',
-      });
+      if (isEdit) {
+        const payload = {
+          name: form.name.trim(),
+          email: form.email.trim(),
+          role: form.role,
+        };
+        if (form.password.trim()) payload.password = form.password;
+        await apiCall(api.put(`/api/users/${editingUser.id}`, payload), {
+          success: 'User diperbarui',
+          loading: 'Menyimpan…',
+        });
+      } else {
+        await apiCall(api.post('/api/users', form), {
+          success: 'User ditambah',
+          loading: 'Menyimpan…',
+        });
+      }
       onSaved?.();
       onClose();
     } catch {
@@ -36,24 +60,34 @@ export default function UserFormModal({ open, onClose, onSaved }) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Tambah user" size="2xl">
+    <Modal open={open} onClose={onClose} title={isEdit ? 'Edit user' : 'Tambah user'} size="2xl">
       <form onSubmit={onSubmit}>
         <div className="form-row cols-2">
           <div>
             <label>Nama</label>
-            <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} required />
+            <input
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              required
+            />
           </div>
           <div>
             <label>Email</label>
-            <input type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} required />
+            <input
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+              required
+            />
           </div>
           <div>
-            <label>Password</label>
+            <label>{isEdit ? 'Password baru (kosongkan jika tidak diubah)' : 'Password'}</label>
             <input
               type="password"
               value={form.password}
               onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-              required
+              required={!isEdit}
+              autoComplete={isEdit ? 'new-password' : 'new-password'}
             />
           </div>
           <div>
@@ -68,8 +102,17 @@ export default function UserFormModal({ open, onClose, onSaved }) {
         </div>
         <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
           <button type="submit" className="btn btn-primary">
-            <UserPlus size={18} strokeWidth={2} aria-hidden />
-            Simpan user
+            {isEdit ? (
+              <>
+                <Save size={18} strokeWidth={2} aria-hidden />
+                Simpan perubahan
+              </>
+            ) : (
+              <>
+                <UserPlus size={18} strokeWidth={2} aria-hidden />
+                Simpan user
+              </>
+            )}
           </button>
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Batal

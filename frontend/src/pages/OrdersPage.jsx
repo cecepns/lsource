@@ -445,6 +445,7 @@ export default function OrdersPage() {
                       <th>Variasi</th>
                       <th>Qty</th>
                       <th>Harga jual</th>
+                      <th>HPP</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -454,6 +455,7 @@ export default function OrdersPage() {
                         <td>{it.variasi || '—'}</td>
                         <td className="tabular-nums">{it.qty}</td>
                         <td className="tabular-nums">{formatMoney(it.selling_price)}</td>
+                        <td className="tabular-nums">{formatMoney(it.hpp_snapshot)}</td>
                       </tr>
                     ))}
                   </tbody>

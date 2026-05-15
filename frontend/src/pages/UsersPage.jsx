@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Plus, Trash2, Users } from 'lucide-react';
+import { Pencil, Plus, Trash2, Users } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.jsx';
 import { api, apiCall, toastApiError } from '../utils/api.js';
 import { confirmAction } from '../utils/confirm.jsx';
@@ -18,6 +18,7 @@ export default function UsersPage() {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [userModalOpen, setUserModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
 
   const fetchUsers = useCallback(async () => {
     const { data } = await api.get('/api/users', { params: { page, limit: LIMIT, search } });
@@ -58,7 +59,14 @@ export default function UsersPage() {
           <Users size={28} strokeWidth={2} className="icon-title" aria-hidden />
           User & akses
         </h1>
-        <button type="button" className="btn btn-primary" onClick={() => setUserModalOpen(true)}>
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={() => {
+            setEditingUser(null);
+            setUserModalOpen(true);
+          }}
+        >
           <Plus size={18} strokeWidth={2} aria-hidden />
           Tambah user
         </button>
@@ -86,16 +94,29 @@ export default function UsersPage() {
                 <td>{u.email}</td>
                 <td>{u.role}</td>
                 <td>
-                  {u.id !== user?.id && (
+                  <div className="flex flex-wrap gap-1.5">
                     <button
                       type="button"
-                      className="btn btn-danger min-h-9 px-2.5 text-xs"
-                      onClick={() => handleDelete(u.id)}
+                      className="btn btn-ghost min-h-9 px-2.5 text-xs"
+                      onClick={() => {
+                        setEditingUser(u);
+                        setUserModalOpen(true);
+                      }}
                     >
-                      <Trash2 size={16} strokeWidth={2} aria-hidden />
-                      Hapus
+                      <Pencil size={14} strokeWidth={2} aria-hidden />
+                      Edit
                     </button>
-                  )}
+                    {u.id !== user?.id && (
+                      <button
+                        type="button"
+                        className="btn btn-danger min-h-9 px-2.5 text-xs"
+                        onClick={() => handleDelete(u.id)}
+                      >
+                        <Trash2 size={16} strokeWidth={2} aria-hidden />
+                        Hapus
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -106,7 +127,15 @@ export default function UsersPage() {
 
       <PaginationBar page={page} total={total} limit={LIMIT} onPageChange={setPage} />
 
-      <UserFormModal open={userModalOpen} onClose={() => setUserModalOpen(false)} onSaved={fetchUsers} />
+      <UserFormModal
+        open={userModalOpen}
+        onClose={() => {
+          setUserModalOpen(false);
+          setEditingUser(null);
+        }}
+        editingUser={editingUser}
+        onSaved={fetchUsers}
+      />
     </div>
   );
 }
