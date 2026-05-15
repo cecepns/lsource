@@ -1,10 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, Save, Trash2 } from 'lucide-react';
 import Select from 'react-select';
 import Modal from './Modal.jsx';
 import { api, apiCall, toastApiError } from '../utils/api.js';
 import { toBackendUrl } from '../utils/endpoints.js';
 import { selectStyles } from './selectTheme.js';
+import { useAuth } from '../context/AuthContext.jsx';
+
+const SHIPPED_PHASE = ['dikirim', 'selesai', 'retur'];
+
+function isShippedPhase(s) {
+  return SHIPPED_PHASE.includes(s);
+}
 
 /** Menu select produk di portal agar tidak terpotong overflow modal (z di atas dialog). */
 const productSelectStyles = {
@@ -67,6 +74,7 @@ function renderProductOptionLabel(option) {
 
 export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
   const isEdit = orderId != null;
+  const { isOwner, isAdmin, isKaryawan } = useAuth();
   const [stores, setStores] = useState([]);
   const [form, setForm] = useState(emptyHeader);
   const [lines, setLines] = useState([emptyLine()]);
@@ -75,6 +83,8 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
   const [loading, setLoading] = useState(false);
   /** ID baris DB yang akan diganti saat simpan edit (satu pesanan multi-item). */
   const [groupLineIds, setGroupLineIds] = useState([]);
+  /** Status saat load (untuk batasan role). */
+  const [initialStatus, setInitialStatus] = useState(null);
 
   useEffect(() => {
     if (!open) return;
@@ -89,6 +99,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
       setForm({ ...emptyHeader });
       setLines([emptyLine()]);
       setGroupLineIds([]);
+      setInitialStatus(null);
       return;
     }
     setLoading(true);
@@ -109,6 +120,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
               : '',
           notes: bundle.notes || '',
         });
+        setInitialStatus(bundle.status || null);
         const items = Array.isArray(bundle.items) ? bundle.items : [];
         setLines(
           items.length
@@ -139,6 +151,35 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
   }, [open, orderId, isEdit, onClose]);
 
   const storeOptions = stores.map((s) => ({ value: s.id, label: s.name }));
+
+  const fullFormLock = isEdit && isKaryawan && initialStatus && isShippedPhase(initialStatus);
+  const lineLock = isEdit && isAdmin;
+  const headerLock =
+    fullFormLock ||
+    (isEdit && isAdmin && initialStatus && isShippedPhase(initialStatus));
+
+  const statusSelectOptions = useMemo(() => {
+    if (isOwner) return statusOptions;
+    if (!isEdit) {
+      if (isAdmin)
+        return statusOptions.filter((o) => ['diproses', 'dikirim'].includes(o.value));
+      return statusOptions;
+    }
+    if (isKaryawan && initialStatus && isShippedPhase(initialStatus)) return [];
+    if (isAdmin && initialStatus === 'diproses')
+      return statusOptions.filter((o) => ['diproses', 'dikirim'].includes(o.value));
+    if (isAdmin && initialStatus === 'dikirim')
+      return statusOptions.filter((o) => ['dikirim', 'selesai', 'retur'].includes(o.value));
+    if (isAdmin && (initialStatus === 'selesai' || initialStatus === 'retur'))
+      return statusOptions.filter((o) => ['selesai', 'retur'].includes(o.value));
+    return statusOptions;
+  }, [isOwner, isAdmin, isKaryawan, isEdit, initialStatus]);
+
+  const showNominalField =
+    !isKaryawan &&
+    (isOwner ||
+      (isAdmin &&
+        (isShippedPhase(form.status) || (!!initialStatus && isShippedPhase(initialStatus)))));
 
   /** Daftar produk — stok satu gudang; toko order = channel penjualan. */
   async function loadProductsBySearch(q) {
@@ -178,6 +219,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
 
   async function onSubmit(e) {
     e.preventDefault();
+    if (fullFormLock) return;
     if (!form.store_id) {
       const { toast } = await import('sonner');
       toast.error('Pilih toko');
@@ -309,10 +351,20 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
         <p className="muted py-8 text-center">Memuat data…</p>
       ) : (
         <form onSubmit={onSubmit}>
+          {fullFormLock ? (
+            <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Pesanan sudah dalam tahap pengiriman/selesai — akun karyawan tidak dapat mengubah data ini.
+            </p>
+          ) : null}
           <div className="form-row cols-2">
             <div>
               <label>No pesanan *</label>
-              <input value={form.order_no} onChange={(e) => setField('order_no', e.target.value)} required />
+              <input
+                value={form.order_no}
+                onChange={(e) => setField('order_no', e.target.value)}
+                required
+                disabled={headerLock}
+              />
             </div>
             <div>
               <label>
@@ -323,6 +375,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                 value={form.resi}
                 onChange={(e) => setField('resi', e.target.value)}
                 placeholder="Opsional — sama untuk semua produk di bawah"
+                disabled={headerLock}
               />
             </div>
             <div>
@@ -339,22 +392,32 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                 }}
                 placeholder="Pilih toko"
                 styles={selectStyles()}
+                isDisabled={headerLock}
               />
             </div>
             <div>
               <label>Tanggal *</label>
-              <input type="date" value={form.order_date} onChange={(e) => setField('order_date', e.target.value)} required />
-            </div>
-            <div>
-              <label>Nominal cair (1 pesanan / 1 resi)</label>
               <input
-                type="number"
-                min={0}
-                value={form.nominal_cair}
-                onChange={(e) => setField('nominal_cair', e.target.value)}
-                placeholder="Kosong = belum cair"
+                type="date"
+                value={form.order_date}
+                onChange={(e) => setField('order_date', e.target.value)}
+                required
+                disabled={headerLock}
               />
             </div>
+            {showNominalField ? (
+              <div>
+                <label>Nominal cair (1 pesanan / 1 resi)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={form.nominal_cair}
+                  onChange={(e) => setField('nominal_cair', e.target.value)}
+                  placeholder="Kosong = belum cair"
+                  disabled={!isOwner && !isAdmin}
+                />
+              </div>
+            ) : null}
           </div>
 
           <div className="mt-5 border-t border-slate-100 pt-4">
@@ -369,7 +432,12 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                       : 'Satu nomor pesanan dan satu no. resi = satu kiriman. Tambahkan beberapa baris untuk banyak jenis barang dalam kiriman yang sama — bukan satu resi per produk.'}
                   </p>
                 </div>
-                <button type="button" className="btn btn-ghost text-sm" onClick={addProductLine}>
+                <button
+                  type="button"
+                  className="btn btn-ghost text-sm"
+                  onClick={addProductLine}
+                  disabled={lineLock || fullFormLock}
+                >
                   <Plus size={18} strokeWidth={2} aria-hidden />
                   Tambah produk
                 </button>
@@ -389,6 +457,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                           type="button"
                           className="btn btn-ghost min-h-8 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
                           onClick={() => removeProductLine(idx)}
+                          disabled={lineLock || fullFormLock}
                         >
                           <Trash2 size={14} strokeWidth={2} aria-hidden />
                           Hapus
@@ -413,6 +482,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                             }
                             menuPosition="fixed"
                             filterOption={() => true}
+                            isDisabled={lineLock || fullFormLock}
                             value={
                               line.product_id
                                 ? productOptions.find((o) => o.value === line.product_id) || {
@@ -438,6 +508,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                           value={line.product_name}
                           onChange={(e) => setLine(idx, { product_name: e.target.value })}
                           required
+                          disabled={lineLock || fullFormLock}
                         />
                       </div>
                       <div>
@@ -445,6 +516,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                         <input
                           value={line.variasi}
                           onChange={(e) => setLine(idx, { variasi: e.target.value })}
+                          disabled={lineLock || fullFormLock}
                         />
                       </div>
                       <div>
@@ -455,6 +527,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                           value={line.qty}
                           onChange={(e) => setLine(idx, { qty: e.target.value })}
                           required
+                          disabled={lineLock || fullFormLock}
                         />
                       </div>
                       <div>
@@ -464,6 +537,7 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
                           min={0}
                           value={line.selling_price}
                           onChange={(e) => setLine(idx, { selling_price: e.target.value })}
+                          disabled={lineLock || fullFormLock}
                         />
                       </div>
                     </div>
@@ -475,12 +549,17 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
           <div className="form-row cols-2 mt-4">
             <div>
               <label>Status order</label>
-              <Select
-                options={statusOptions}
-                value={statusOptions.find((o) => o.value === form.status)}
-                onChange={(o) => setField('status', o?.value || 'diproses')}
-                styles={selectStyles()}
-              />
+              {statusSelectOptions.length ? (
+                <Select
+                  options={statusSelectOptions}
+                  value={statusSelectOptions.find((o) => o.value === form.status)}
+                  onChange={(o) => setField('status', o?.value || 'diproses')}
+                  styles={selectStyles()}
+                  isDisabled={fullFormLock}
+                />
+              ) : (
+                <p className="muted mt-1 text-sm">Status tidak dapat diubah untuk akun ini.</p>
+              )}
             </div>
             {!isEdit ? (
               <div>
@@ -496,11 +575,16 @@ export default function OrderFormModal({ open, onClose, orderId, onSaved }) {
 
           <div className="mt-4">
             <label>Catatan</label>
-            <textarea rows={2} value={form.notes} onChange={(e) => setField('notes', e.target.value)} />
+            <textarea
+              rows={2}
+              value={form.notes}
+              onChange={(e) => setField('notes', e.target.value)}
+              disabled={headerLock}
+            />
           </div>
 
           <div className="mt-5 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-            <button type="submit" className="btn btn-primary">
+            <button type="submit" className="btn btn-primary" disabled={fullFormLock}>
               <Save size={18} strokeWidth={2} aria-hidden />
               Simpan
             </button>

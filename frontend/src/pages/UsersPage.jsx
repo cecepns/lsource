@@ -11,7 +11,7 @@ import UserFormModal from '../components/UserFormModal.jsx';
 const LIMIT = 10;
 
 export default function UsersPage() {
-  const { isAdmin, user } = useAuth();
+  const { isOwner, user } = useAuth();
   const [searchInput, setSearchInput] = useState('');
   const search = useDebouncedValue(searchInput, 1000);
   const [page, setPage] = useState(1);
@@ -30,11 +30,11 @@ export default function UsersPage() {
   }, [search]);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isOwner) return;
     fetchUsers().catch((e) => toastApiError(e));
-  }, [fetchUsers, isAdmin]);
+  }, [fetchUsers, isOwner]);
 
-  if (!isAdmin) return <Navigate to="/" replace />;
+  if (!isOwner) return <Navigate to="/" replace />;
 
   async function handleDelete(id) {
     const ok = await confirmAction({ message: 'Hapus user ini?', confirmLabel: 'Hapus' });

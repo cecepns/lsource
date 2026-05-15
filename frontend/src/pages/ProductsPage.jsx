@@ -32,7 +32,7 @@ function stockCellClass(stock) {
 }
 
 export default function ProductsPage() {
-  const { isAdmin } = useAuth();
+  const { isOwnerOrAdmin } = useAuth();
   const [searchInput, setSearchInput] = useState('');
   const search = useDebouncedValue(searchInput, 1000);
   const [page, setPage] = useState(1);
@@ -210,7 +210,7 @@ export default function ProductsPage() {
                       <Pencil size={14} strokeWidth={2} aria-hidden />
                       Edit
                     </button>
-                    {isAdmin && (
+                    {isOwnerOrAdmin && (
                       <button
                         type="button"
                         className="btn btn-danger min-h-9 px-2.5 text-xs"

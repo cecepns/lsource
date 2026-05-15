@@ -10,6 +10,7 @@ import {
   PackagePlus,
   ShoppingCart,
   Store,
+  Truck,
   Users,
   X,
 } from 'lucide-react';
@@ -23,7 +24,8 @@ const links = [
   { to: '/stock-audit', label: 'Stok audit', Icon: ClipboardList },
   { to: '/stock-history', label: 'History stok', Icon: History },
   { to: '/stores', label: 'Toko', Icon: Store },
-  { to: '/users', label: 'User', admin: true, Icon: Users },
+  { to: '/kurir-gudang', label: 'Kurir gudang', Icon: Truck },
+  { to: '/users', label: 'User', ownerOnly: true, Icon: Users },
 ];
 
 const navLinkDesktop = ({ isActive }) =>
@@ -34,7 +36,13 @@ const navLinkDesktop = ({ isActive }) =>
       : 'text-slate-400 hover:bg-white/5 hover:text-slate-100',
   ].join(' ');
 
-function SidebarContent({ user, isAdmin, onLinkClick, headerLeading, onLogout }) {
+function SidebarContent({ user, isOwner, onLinkClick, headerLeading, onLogout }) {
+  const r = user?.role;
+  const visible =
+    r === 'checker_pengiriman'
+      ? links.filter((l) => l.to === '/kurir-gudang')
+      : links.filter((l) => !l.ownerOnly || isOwner);
+
   return (
     <>
       <div className="mb-1 flex items-center gap-2 border-b border-slate-700/70 px-2.5 pb-5 pt-1 text-base font-bold tracking-tight text-slate-100">
@@ -42,9 +50,7 @@ function SidebarContent({ user, isAdmin, onLinkClick, headerLeading, onLogout })
         <Store size={22} strokeWidth={2.25} className="shrink-0 text-blue-400" aria-hidden />
         <span className="min-w-0 truncate">Penjualan MP</span>
       </div>
-      {links
-        .filter((l) => !l.admin || isAdmin)
-        .map(({ to, label, end, Icon }) => (
+      {visible.map(({ to, label, end, Icon }) => (
           <NavLink
             key={to}
             to={to}
@@ -58,7 +64,9 @@ function SidebarContent({ user, isAdmin, onLinkClick, headerLeading, onLogout })
         ))}
       <div className="mt-auto border-t border-slate-700/70 px-2.5 pt-4 text-sm">
         <span className="mb-0.5 block font-semibold text-slate-100">{user?.name}</span>
-        <span className="text-xs capitalize text-slate-500">{user?.role}</span>
+        <span className="text-xs capitalize text-slate-500">
+          {String(user?.role || '').replace(/_/g, ' ')}
+        </span>
         <button
           type="button"
           className="btn mt-2.5 w-full border border-slate-600/90 bg-slate-700/50 text-slate-200 shadow-none hover:border-slate-500 hover:bg-slate-700 hover:text-white"
@@ -76,7 +84,7 @@ function SidebarContent({ user, isAdmin, onLinkClick, headerLeading, onLogout })
 }
 
 export default function Layout() {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, isOwner } = useAuth();
   const nav = useNavigate();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -84,6 +92,13 @@ export default function Layout() {
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (user?.role !== 'checker_pengiriman') return;
+    if (location.pathname === '/kurir-gudang' || location.pathname.startsWith('/kurir-gudang/'))
+      return;
+    nav('/kurir-gudang', { replace: true });
+  }, [user?.role, location.pathname, nav]);
 
   useEffect(() => {
     const media = window.matchMedia('(min-width: 768px)');
@@ -157,7 +172,7 @@ export default function Layout() {
         >
           <SidebarContent
             user={user}
-            isAdmin={isAdmin}
+            isOwner={isOwner}
             onLinkClick={() => setMobileOpen(false)}
             onLogout={handleLogout}
             headerLeading={
@@ -175,7 +190,7 @@ export default function Layout() {
       </div>
 
       <nav className="fixed left-0 top-0 z-40 hidden h-full w-[228px] flex-col gap-1 border-r border-slate-700/80 bg-gradient-to-b from-slate-800 via-slate-800 to-slate-950 p-3 pb-5 shadow-[4px_0_24px_rgba(15,23,42,0.12)] ring-1 ring-inset ring-white/[0.06] md:flex">
-        <SidebarContent user={user} isAdmin={isAdmin} onLogout={handleLogout} />
+        <SidebarContent user={user} isOwner={isOwner} onLogout={handleLogout} />
       </nav>
 
       <main className="mx-auto w-full max-w-8xl overflow-x-hidden px-3 pb-6 pt-[calc(3.5rem+0.625rem)] md:pb-3.5 md:pl-[calc(228px+0.85rem)] md:pr-4 md:pt-3">

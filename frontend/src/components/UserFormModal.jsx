@@ -6,8 +6,10 @@ import { api, apiCall } from '../utils/api.js';
 import { selectStyles } from './selectTheme.js';
 
 const roleOptions = [
-  { value: 'karyawan', label: 'Karyawan (input, tanpa hapus penting)' },
-  { value: 'admin', label: 'Admin (full)' },
+  { value: 'karyawan', label: 'Karyawan' },
+  { value: 'admin', label: 'Admin (order: pencairan & status selesai/retur; tanpa ubah isi barang)' },
+  { value: 'checker_pengiriman', label: 'Checker pengiriman (hanya menu Kurir gudang)' },
+  { value: 'owner', label: 'Owner (akses penuh)' },
 ];
 
 const empty = { name: '', email: '', password: '', role: 'karyawan' };

@@ -107,9 +107,9 @@ async function ensureDefaultAdmin() {
   const hash = await bcrypt.hash('admin123', 10);
   await pool.query(
     'INSERT INTO users (name, email, password_hash, role) VALUES (?,?,?,?)',
-    ['Administrator', 'admin@local.test', hash, 'admin']
+    ['Administrator', 'admin@local.test', hash, 'owner']
   );
-  console.log('Default admin dibuat: admin@local.test / admin123');
+  console.log('Default owner dibuat: admin@local.test / admin123');
 }
 
 function authRequired(req, res, next) {
@@ -124,9 +124,24 @@ function authRequired(req, res, next) {
   }
 }
 
-function adminOnly(req, res, next) {
-  if (req.user?.role !== 'admin')
-    return res.status(403).json({ message: 'Hanya admin' });
+function staffExceptChecker(req, res, next) {
+  if (req.user?.role === 'checker_pengiriman')
+    return res.status(403).json({
+      message: 'Akses tidak tersedia untuk role checker pengiriman',
+    });
+  next();
+}
+
+function ownerOrAdmin(req, res, next) {
+  const r = req.user?.role;
+  if (r !== 'owner' && r !== 'admin')
+    return res.status(403).json({ message: 'Hanya owner atau admin' });
+  next();
+}
+
+function ownerOnly(req, res, next) {
+  if (req.user?.role !== 'owner')
+    return res.status(403).json({ message: 'Hanya owner' });
   next();
 }
 
@@ -166,7 +181,7 @@ app.get('/api/auth/me', authRequired, async (req, res) => {
 });
 
 /* ——— Stores ——— */
-app.get('/api/stores', authRequired, async (req, res) => {
+app.get('/api/stores', authRequired, staffExceptChecker, async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '' } = req.query;
     const { page: p, limit: l, offset } = paginate(page, limit);
@@ -187,7 +202,7 @@ app.get('/api/stores', authRequired, async (req, res) => {
   }
 });
 
-app.post('/api/stores', authRequired, adminOnly, async (req, res) => {
+app.post('/api/stores', authRequired, staffExceptChecker, ownerOrAdmin, async (req, res) => {
   try {
     const { name } = req.body || {};
     if (!name?.trim()) return res.status(400).json({ message: 'Nama toko wajib' });
@@ -203,7 +218,7 @@ app.post('/api/stores', authRequired, adminOnly, async (req, res) => {
   }
 });
 
-app.put('/api/stores/:id', authRequired, adminOnly, async (req, res) => {
+app.put('/api/stores/:id', authRequired, staffExceptChecker, ownerOrAdmin, async (req, res) => {
   try {
     const { name } = req.body || {};
     if (!name?.trim()) return res.status(400).json({ message: 'Nama toko wajib' });
@@ -218,7 +233,7 @@ app.put('/api/stores/:id', authRequired, adminOnly, async (req, res) => {
   }
 });
 
-app.delete('/api/stores/:id', authRequired, adminOnly, async (req, res) => {
+app.delete('/api/stores/:id', authRequired, staffExceptChecker, ownerOrAdmin, async (req, res) => {
   try {
     await pool.query('DELETE FROM stores WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
@@ -228,7 +243,7 @@ app.delete('/api/stores/:id', authRequired, adminOnly, async (req, res) => {
   }
 });
 
-app.get('/api/stores/all', authRequired, async (_req, res) => {
+app.get('/api/stores/all', authRequired, staffExceptChecker, async (_req, res) => {
   const [rows] = await pool.query(
     'SELECT id, name FROM stores ORDER BY name ASC'
   );
@@ -236,7 +251,7 @@ app.get('/api/stores/all', authRequired, async (_req, res) => {
 });
 
 /* ——— Products ——— */
-app.get('/api/products', authRequired, async (req, res) => {
+app.get('/api/products', authRequired, staffExceptChecker, async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '', sort_stock } = req.query;
     const { page: p, limit: l, offset } = paginate(page, limit);
@@ -264,7 +279,7 @@ app.get('/api/products', authRequired, async (req, res) => {
   }
 });
 
-app.get('/api/products/by-barcode', authRequired, async (req, res) => {
+app.get('/api/products/by-barcode', authRequired, staffExceptChecker, async (req, res) => {
   const { barcode } = req.query;
   if (!barcode?.trim())
     return res.status(400).json({ message: 'Barcode wajib' });
@@ -275,7 +290,7 @@ app.get('/api/products/by-barcode', authRequired, async (req, res) => {
   res.json(rows[0] || null);
 });
 
-app.get('/api/products/:id', authRequired, async (req, res) => {
+app.get('/api/products/:id', authRequired, staffExceptChecker, async (req, res) => {
   const [rows] = await pool.query('SELECT * FROM products WHERE id = ? LIMIT 1', [
     req.params.id,
   ]);
@@ -283,7 +298,7 @@ app.get('/api/products/:id', authRequired, async (req, res) => {
   res.json(rows[0]);
 });
 
-app.post('/api/products/:id/stock-in', authRequired, async (req, res) => {
+app.post('/api/products/:id/stock-in', authRequired, staffExceptChecker, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const { qty, notes } = req.body || {};
@@ -330,7 +345,7 @@ app.post('/api/products/:id/stock-in', authRequired, async (req, res) => {
   }
 });
 
-app.post('/api/stock-audit', authRequired, async (req, res) => {
+app.post('/api/stock-audit', authRequired, staffExceptChecker, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const { items, notes, audit_date } = req.body || {};
@@ -404,7 +419,7 @@ app.post('/api/stock-audit', authRequired, async (req, res) => {
   }
 });
 
-app.get('/api/stock-audit-history', authRequired, async (req, res) => {
+app.get('/api/stock-audit-history', authRequired, staffExceptChecker, async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '' } = req.query;
     const { page: p, limit: l, offset } = paginate(page, limit);
@@ -439,7 +454,7 @@ app.get('/api/stock-audit-history', authRequired, async (req, res) => {
   }
 });
 
-app.get('/api/products/:id/stock-in-history', authRequired, async (req, res) => {
+app.get('/api/products/:id/stock-in-history', authRequired, staffExceptChecker, async (req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT h.id, h.product_id, h.qty_before, h.qty_added, h.qty_after, h.notes, h.created_at,
@@ -458,7 +473,7 @@ app.get('/api/products/:id/stock-in-history', authRequired, async (req, res) => 
   }
 });
 
-app.get('/api/products/:id/stock-history', authRequired, async (req, res) => {
+app.get('/api/products/:id/stock-history', authRequired, staffExceptChecker, async (req, res) => {
   try {
     const productId = Number(req.params.id);
     if (!productId)
@@ -537,7 +552,7 @@ app.get('/api/products/:id/stock-history', authRequired, async (req, res) => {
   }
 });
 
-app.get('/api/stock-in-history', authRequired, async (req, res) => {
+app.get('/api/stock-in-history', authRequired, staffExceptChecker, async (req, res) => {
   try {
     const { page = 1, limit = 10, search = '' } = req.query;
     const { page: p, limit: l, offset } = paginate(page, limit);
@@ -572,7 +587,7 @@ app.get('/api/stock-in-history', authRequired, async (req, res) => {
   }
 });
 
-app.post('/api/products', authRequired, productPhotoUploadMaybe, async (req, res) => {
+app.post('/api/products', authRequired, staffExceptChecker, productPhotoUploadMaybe, async (req, res) => {
   try {
     const { name, barcode, hpp, stock } = req.body || {};
     const photoPath = req.file ? `/uploads/${req.file.filename}` : null;
@@ -598,7 +613,7 @@ app.post('/api/products', authRequired, productPhotoUploadMaybe, async (req, res
   }
 });
 
-app.put('/api/products/:id', authRequired, productPhotoUploadMaybe, async (req, res) => {
+app.put('/api/products/:id', authRequired, staffExceptChecker, productPhotoUploadMaybe, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const { name, barcode, hpp, stock, stock_in, stock_in_notes, remove_photo } = req.body || {};
@@ -668,7 +683,7 @@ app.put('/api/products/:id', authRequired, productPhotoUploadMaybe, async (req, 
   }
 });
 
-app.delete('/api/products/:id', authRequired, adminOnly, async (req, res) => {
+app.delete('/api/products/:id', authRequired, staffExceptChecker, ownerOrAdmin, async (req, res) => {
   try {
     const [rows] = await pool.query(
       'SELECT photo_url FROM products WHERE id = ? LIMIT 1',
@@ -699,8 +714,163 @@ function shouldConsumeStock(status) {
   return status !== 'retur';
 }
 
+function isShippedPhaseStatus(s) {
+  return s === 'dikirim' || s === 'selesai' || s === 'retur';
+}
+
+function normalizeVariasi(v) {
+  return String(v ?? '').trim();
+}
+
+function lineItemsMatchExisting(sortedExisting, items) {
+  if (!Array.isArray(items) || sortedExisting.length !== items.length)
+    return false;
+  for (let i = 0; i < items.length; i++) {
+    const r = sortedExisting[i];
+    const it = items[i];
+    if (String(it.product_name || '').trim() !== String(r.product_name).trim())
+      return false;
+    if (normalizeVariasi(it.variasi) !== normalizeVariasi(r.variasi)) return false;
+    if (Number(it.qty) !== Number(r.qty)) return false;
+    if (Number(it.selling_price || 0) !== Number(r.selling_price)) return false;
+    const pid = it.product_id ? Number(it.product_id) : null;
+    const rid = r.product_id ? Number(r.product_id) : null;
+    if (pid !== rid) return false;
+  }
+  return true;
+}
+
+function headerMatchesLockedFields(firstRow, body) {
+  const str = (v) => (v == null || v === '' ? '' : String(v).trim());
+  const on = String(body.order_no ?? '').trim() === String(firstRow.order_no).trim();
+  const sid = Number(body.store_id) === Number(firstRow.store_id);
+  const od =
+    orderDateKeyDb(body.order_date) === orderDateKeyDb(firstRow.order_date);
+  const resi = str(body.resi) === str(firstRow.resi);
+  const notes = str(body.notes) === str(firstRow.notes);
+  return on && sid && od && resi && notes;
+}
+
+function parseNominalCairInput(body) {
+  if (!Object.prototype.hasOwnProperty.call(body, 'nominal_cair'))
+    return { present: false, value: undefined };
+  const raw = body.nominal_cair;
+  if (raw === '' || raw == null || raw === undefined)
+    return { present: true, value: null };
+  return { present: true, value: Number(raw) };
+}
+
+function effectiveNominalCairAfterUpdate(body, prevGroupNominal) {
+  const p = parseNominalCairInput(body);
+  if (!p.present) return prevGroupNominal;
+  return p.value;
+}
+
+/** @returns {{ status: number, message: string } | null} */
+function assertOrderGroupUpdateAllowed(role, sortedExisting, body) {
+  if (role === 'checker_pengiriman') {
+    return {
+      status: 403,
+      message:
+        'Checker pengiriman menandai kirim lewat menu Kurir gudang, bukan edit pesanan',
+    };
+  }
+  if (role === 'owner') return null;
+
+  const statusSet = new Set(sortedExisting.map((r) => r.status));
+  if (statusSet.size !== 1) {
+    return {
+      status: 400,
+      message: 'Status baris dalam satu pesanan tidak konsisten — hubungi owner',
+    };
+  }
+  const prevStatus = sortedExisting[0].status;
+  const first = sortedExisting[0];
+  const items = body.items;
+  const newStatus = body.status != null ? String(body.status) : prevStatus;
+  const prevNom = sortedExisting.find((r) => r.nominal_cair != null)?.nominal_cair;
+  const prevGroupNominal = prevNom != null ? Number(prevNom) : null;
+  const nextNominal = effectiveNominalCairAfterUpdate(body, prevGroupNominal);
+
+  if (role === 'karyawan') {
+    const p = parseNominalCairInput(body);
+    if (p.present && p.value != null)
+      return { status: 403, message: 'Nominal cair hanya admin atau owner' };
+    if (isShippedPhaseStatus(prevStatus)) {
+      return {
+        status: 403,
+        message: 'Pesanan sudah dikirim/selesai — tidak dapat diubah',
+      };
+    }
+  }
+
+  if (role === 'admin') {
+    if (!lineItemsMatchExisting(sortedExisting, items)) {
+      return {
+        status: 403,
+        message: 'Admin tidak dapat mengubah produk, qty, atau baris dalam pesanan',
+      };
+    }
+    if (prevStatus === 'diproses') {
+      if (!['diproses', 'dikirim'].includes(newStatus)) {
+        return {
+          status: 403,
+          message: 'Admin hanya dapat mengubah status Diproses menjadi Dikirim',
+        };
+      }
+      if (
+        nextNominal != null &&
+        nextNominal !== prevGroupNominal &&
+        !isShippedPhaseStatus(newStatus)
+      ) {
+        return {
+          status: 400,
+          message: 'Nominal cair hanya diisi setelah status Dikirim',
+        };
+      }
+    } else if (prevStatus === 'dikirim') {
+      if (!['dikirim', 'selesai', 'retur'].includes(newStatus)) {
+        return {
+          status: 403,
+          message: 'Admin hanya dapat menutup pesanan ke Selesai atau Retur',
+        };
+      }
+      if (!headerMatchesLockedFields(first, body)) {
+        return {
+          status: 403,
+          message:
+            'Untuk pesanan Dikirim admin hanya mengisi pencairan dan status selesai/retur',
+        };
+      }
+    } else if (prevStatus === 'selesai' || prevStatus === 'retur') {
+      if (newStatus !== 'selesai' && newStatus !== 'retur') {
+        return {
+          status: 403,
+          message: 'Admin hanya dapat mengubah status antara Selesai dan Retur',
+        };
+      }
+      if (!headerMatchesLockedFields(first, body)) {
+        return {
+          status: 403,
+          message:
+            'Header pesanan (no, toko, tanggal, resi, catatan) tidak dapat diubah admin',
+        };
+      }
+    }
+
+    if (nextNominal != null && !isShippedPhaseStatus(newStatus)) {
+      return {
+        status: 400,
+        message: 'Nominal cair hanya diisi setelah status Dikirim',
+      };
+    }
+  }
+
+  return null;
+}
+
 /* ——— Orders ——— */
-app.get('/api/orders/export', authRequired, async (req, res) => {
+app.get('/api/orders/export', authRequired, staffExceptChecker, async (req, res) => {
   try {
     const { store_id, date_from, date_to, payout, search = '' } = req.query;
     let where =
@@ -719,8 +889,17 @@ app.get('/api/orders/export', authRequired, async (req, res) => {
       where += ' AND o.order_date <= ?';
       params.push(date_to);
     }
-    if (payout === 'belum') where += ' AND o.nominal_cair IS NULL';
-    else if (payout === 'sudah') where += ' AND o.nominal_cair IS NOT NULL';
+    if (payout === 'belum') {
+      where += ` AND (
+        SELECT SUM(CASE WHEN x.nominal_cair IS NULL THEN 1 ELSE 0 END)
+        FROM orders x
+        WHERE x.order_no = o.order_no AND x.store_id = o.store_id AND DATE(x.order_date) = DATE(o.order_date)
+      ) = (
+        SELECT COUNT(*)
+        FROM orders x
+        WHERE x.order_no = o.order_no AND x.store_id = o.store_id AND DATE(x.order_date) = DATE(o.order_date)
+      )`;
+    } else if (payout === 'sudah') where += ' AND o.nominal_cair IS NOT NULL';
 
     const [rows] = await pool.query(
       `SELECT o.*, s.name AS store_name FROM orders o
@@ -754,7 +933,65 @@ app.get('/api/orders/export', authRequired, async (req, res) => {
   }
 });
 
-app.get('/api/orders/:id', authRequired, async (req, res) => {
+/** Checker / owner: tandai seluruh grup pesanan (status Diproses) menjadi Dikirim via no pesanan atau resi. */
+app.post('/api/orders/mark-dikirim', authRequired, async (req, res) => {
+  try {
+    const role = req.user?.role;
+    if (role !== 'checker_pengiriman' && role !== 'owner')
+      return res.status(403).json({ message: 'Hanya checker pengiriman atau owner' });
+    const code = String(req.body?.code ?? '').trim();
+    if (!code) return res.status(400).json({ message: 'No pesanan atau resi wajib' });
+
+    let [rows] = await pool.query(
+      `SELECT * FROM orders WHERE order_no = ? ORDER BY id DESC LIMIT 200`,
+      [code]
+    );
+    if (!rows.length) {
+      [rows] = await pool.query(
+        `SELECT * FROM orders WHERE IFNULL(resi,'') = ? ORDER BY id DESC LIMIT 200`,
+        [code]
+      );
+    }
+    if (!rows.length)
+      return res.status(404).json({ message: 'Pesanan tidak ditemukan' });
+
+    const groups = new Map();
+    for (const r of rows) {
+      const k = `${r.order_no}\0${r.store_id}\0${orderDateKeyDb(r.order_date)}`;
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(r);
+    }
+    if (groups.size > 1) {
+      return res.status(400).json({
+        message:
+          'Kode mengenai lebih dari satu pesanan — gunakan no pesanan persis atau resi yang unik',
+      });
+    }
+    const groupRows = [...groups.values()][0];
+    const bad = groupRows.find((r) => r.status !== 'diproses');
+    if (bad) {
+      return res.status(400).json({
+        message: `Pesanan sudah berstatus "${bad.status}", hanya Diproses yang bisa ditandai dikirim di sini`,
+      });
+    }
+    const ids = groupRows.map((r) => r.id);
+    await pool.query(
+      `UPDATE orders SET status = 'dikirim' WHERE id IN (${ids.map(() => '?').join(',')})`,
+      ids
+    );
+    res.json({
+      ok: true,
+      order_no: groupRows[0].order_no,
+      line_count: ids.length,
+      message: 'Status diubah ke Dikirim',
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ message: 'Gagal menandai dikirim' });
+  }
+});
+
+app.get('/api/orders/:id', authRequired, staffExceptChecker, async (req, res) => {
   try {
     const [rows] = await pool.query(
       `SELECT o.*, s.name AS store_name,
@@ -801,7 +1038,7 @@ app.get('/api/orders/:id', authRequired, async (req, res) => {
   }
 });
 
-app.get('/api/orders', authRequired, async (req, res) => {
+app.get('/api/orders', authRequired, staffExceptChecker, async (req, res) => {
   try {
     const {
       page = 1,
@@ -838,7 +1075,7 @@ app.get('/api/orders', authRequired, async (req, res) => {
     let payoutHaving = '';
     if (payout === 'belum') {
       payoutHaving =
-        ' HAVING SUM(CASE WHEN o.nominal_cair IS NULL THEN 1 ELSE 0 END) > 0';
+        ' HAVING SUM(CASE WHEN o.nominal_cair IS NULL THEN 1 ELSE 0 END) = COUNT(*)';
     } else if (payout === 'sudah') {
       payoutHaving =
         ' HAVING SUM(CASE WHEN o.nominal_cair IS NULL THEN 1 ELSE 0 END) = 0 AND COUNT(*) > 0';
@@ -941,7 +1178,7 @@ app.get('/api/orders', authRequired, async (req, res) => {
   }
 });
 
-app.post('/api/orders', authRequired, orderUploadMaybe, async (req, res) => {
+app.post('/api/orders', authRequired, staffExceptChecker, orderUploadMaybe, async (req, res) => {
   const body = req.body || {};
   let items = body.items;
   if (typeof items === 'string') {
@@ -955,6 +1192,12 @@ app.post('/api/orders', authRequired, orderUploadMaybe, async (req, res) => {
 
   const conn = await pool.getConnection();
   try {
+    const role = req.user?.role;
+    if (role === 'checker_pengiriman')
+      return res
+        .status(403)
+        .json({ message: 'Checker hanya menggunakan menu Kurir gudang' });
+
     if (isMulti) {
       const order_no = body.order_no;
       const store_id = body.store_id;
@@ -967,6 +1210,19 @@ app.post('/api/orders', authRequired, orderUploadMaybe, async (req, res) => {
       const resi = body.resi?.trim() || null;
       const notes = body.notes?.trim() || null;
       const attachment_path = req.file ? `/uploads/${req.file.filename}` : null;
+
+      const gnom =
+        body.nominal_cair === '' ||
+        body.nominal_cair == null ||
+        body.nominal_cair === undefined
+          ? null
+          : Number(body.nominal_cair);
+      if (role === 'karyawan' && gnom != null)
+        return res.status(403).json({ message: 'Nominal cair hanya admin atau owner' });
+      if (role !== 'owner' && gnom != null && !isShippedPhaseStatus(stat))
+        return res.status(400).json({
+          message: 'Nominal cair hanya bisa diisi setelah status Dikirim',
+        });
 
       await conn.beginTransaction();
       const ids = [];
@@ -1081,9 +1337,17 @@ app.post('/api/orders', authRequired, orderUploadMaybe, async (req, res) => {
 
     const qty = Number(body.qty) || 1;
     const nominal_cair =
-      body.nominal_cair === '' || body.nominal_cair == null
+      body.nominal_cair === '' ||
+      body.nominal_cair == null ||
+      body.nominal_cair === undefined
         ? null
         : Number(body.nominal_cair);
+    if (role === 'karyawan' && nominal_cair != null)
+      return res.status(403).json({ message: 'Nominal cair hanya admin atau owner' });
+    if (role !== 'owner' && nominal_cair != null && !isShippedPhaseStatus(stat))
+      return res.status(400).json({
+        message: 'Nominal cair hanya bisa diisi setelah status Dikirim',
+      });
     const payout_at = nominal_cair != null ? new Date() : null;
 
     const attachment_path = req.file ? `/uploads/${req.file.filename}` : null;
@@ -1132,7 +1396,7 @@ app.post('/api/orders', authRequired, orderUploadMaybe, async (req, res) => {
 });
 
 /** Ganti seluruh baris DB satu pesanan (multi-item): hapus line_ids lalu insert ulang seperti order baru. */
-app.put('/api/orders/group', authRequired, async (req, res) => {
+app.put('/api/orders/group', authRequired, staffExceptChecker, async (req, res) => {
   const body = req.body || {};
   let lineIds = Array.isArray(body.line_ids)
     ? body.line_ids.map((x) => Number(x)).filter((n) => Number.isFinite(n) && n > 0)
@@ -1178,6 +1442,10 @@ app.put('/api/orders/group', authRequired, async (req, res) => {
       });
     }
 
+    const sorted = [...existing].sort((a, b) => a.id - b.id);
+    const permErr = assertOrderGroupUpdateAllowed(req.user?.role, sorted, body);
+    if (permErr) return res.status(permErr.status).json({ message: permErr.message });
+
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       if (!it.product_name?.trim()) {
@@ -1193,7 +1461,6 @@ app.put('/api/orders/group', authRequired, async (req, res) => {
       }
     }
 
-    const sorted = [...existing].sort((a, b) => a.id - b.id);
     const firstAttachment = sorted[0].attachment_path;
 
     await conn.beginTransaction();
@@ -1292,7 +1559,7 @@ app.put('/api/orders/group', authRequired, async (req, res) => {
   }
 });
 
-app.put('/api/orders/:id', authRequired, async (req, res) => {
+app.put('/api/orders/:id', authRequired, staffExceptChecker, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const prev = await getOrderById(conn, req.params.id);
@@ -1334,6 +1601,38 @@ app.put('/api/orders/:id', authRequired, async (req, res) => {
       payout_at = new Date();
     if (nominal_cair == null) payout_at = null;
 
+    const product_name_m =
+      body.product_name != null
+        ? String(body.product_name).trim()
+        : prev.product_name;
+    const variasi_m =
+      body.variasi !== undefined
+        ? body.variasi?.trim() || null
+        : prev.variasi;
+    const selling_m = Number(body.selling_price ?? prev.selling_price) || 0;
+    const order_no_m =
+      body.order_no != null ? String(body.order_no).trim() : prev.order_no;
+    const assertBody = {
+      ...body,
+      status: stat,
+      order_no: order_no_m,
+      store_id: body.store_id ?? prev.store_id,
+      order_date: body.order_date ?? prev.order_date,
+      resi: body.resi !== undefined ? body.resi : prev.resi,
+      notes: body.notes !== undefined ? body.notes : prev.notes,
+      items: [
+        {
+          product_id,
+          product_name: product_name_m,
+          variasi: variasi_m,
+          qty,
+          selling_price: selling_m,
+        },
+      ],
+    };
+    const permErr = assertOrderGroupUpdateAllowed(req.user?.role, [prev], assertBody);
+    if (permErr) return res.status(permErr.status).json({ message: permErr.message });
+
     await conn.beginTransaction();
 
     // stok: lepas efek order lama
@@ -1364,27 +1663,18 @@ app.put('/api/orders/:id', authRequired, async (req, res) => {
       ]);
     }
 
-    const order_no =
-      body.order_no != null ? String(body.order_no).trim() : prev.order_no;
-    const product_name =
-      body.product_name != null
-        ? String(body.product_name).trim()
-        : prev.product_name;
-
     await conn.query(
       `UPDATE orders SET
         order_no=?, resi=?, product_name=?, variasi=?, qty=?, selling_price=?, hpp_snapshot=?,
         store_id=?, product_id=?, order_date=?, status=?, nominal_cair=?, payout_at=?, notes=?
       WHERE id=?`,
       [
-        order_no,
+        order_no_m,
         body.resi !== undefined ? body.resi?.trim() || null : prev.resi,
-        product_name,
-        body.variasi !== undefined
-          ? body.variasi?.trim() || null
-          : prev.variasi,
+        product_name_m,
+        variasi_m,
         qty,
-        Number(body.selling_price ?? prev.selling_price) || 0,
+        selling_m,
         hpp_snapshot,
         body.store_id ?? prev.store_id,
         product_id,
@@ -1408,7 +1698,7 @@ app.put('/api/orders/:id', authRequired, async (req, res) => {
   }
 });
 
-app.delete('/api/orders/:id', authRequired, adminOnly, async (req, res) => {
+app.delete('/api/orders/:id', authRequired, staffExceptChecker, ownerOnly, async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const prev = await getOrderById(conn, req.params.id);
@@ -1444,7 +1734,7 @@ app.delete('/api/orders/:id', authRequired, adminOnly, async (req, res) => {
 });
 
 /* ——— Dashboard ——— */
-app.get('/api/dashboard', authRequired, async (req, res) => {
+app.get('/api/dashboard', authRequired, staffExceptChecker, async (req, res) => {
   try {
     const { store_id, date_from, date_to } = req.query;
     let oWhere = '1=1';
@@ -1462,13 +1752,35 @@ app.get('/api/dashboard', authRequired, async (req, res) => {
       params.push(date_to);
     }
 
+    const oWhereAliased = oWhere
+      .replace(/\bstore_id\b/g, 'o.store_id')
+      .replace(/\border_date\b/g, 'o.order_date');
+
     const [belumCair] = await pool.query(
-      `SELECT COUNT(*) AS c FROM orders WHERE ${oWhere} AND nominal_cair IS NULL`,
+      `SELECT COUNT(*) AS c FROM (
+        SELECT 1 AS x
+        FROM orders o
+        WHERE ${oWhereAliased}
+        GROUP BY o.order_no, o.store_id, DATE(o.order_date)
+        HAVING SUM(CASE WHEN o.nominal_cair IS NULL THEN 1 ELSE 0 END) = COUNT(*)
+      ) grp`,
       params
     );
 
+    /* Modal nyangkut: hanya grup order yang belum ada nominal_cair sama sekali.
+       Baris lanjutan multi-item sering NULL walau pembayaran tercatat di baris pertama. */
     const [modalNyangkut] = await pool.query(
-      `SELECT COALESCE(SUM(qty * hpp_snapshot),0) AS t FROM orders WHERE ${oWhere} AND nominal_cair IS NULL AND status != 'retur'`,
+      `SELECT COALESCE(SUM(o.qty * o.hpp_snapshot), 0) AS t
+       FROM orders o
+       WHERE ${oWhereAliased}
+         AND o.status != 'retur'
+         AND NOT EXISTS (
+           SELECT 1 FROM orders x
+           WHERE x.order_no = o.order_no
+             AND x.store_id = o.store_id
+             AND DATE(x.order_date) = DATE(o.order_date)
+             AND x.nominal_cair IS NOT NULL
+         )`,
       params
     );
 
@@ -1527,12 +1839,25 @@ app.get('/api/dashboard', authRequired, async (req, res) => {
         ow += ' AND order_date <= ?';
         pparams.push(date_to);
       }
+      const owAliased = ow
+        .replace(/\bstore_id\b/g, 'o.store_id')
+        .replace(/\border_date\b/g, 'o.order_date');
       const [cairSum] = await pool.query(
         `SELECT COALESCE(SUM(nominal_cair),0) AS t FROM orders WHERE ${ow} AND nominal_cair IS NOT NULL`,
         pparams
       );
       const [modalBelum] = await pool.query(
-        `SELECT COALESCE(SUM(qty * hpp_snapshot),0) AS t FROM orders WHERE ${ow} AND nominal_cair IS NULL AND status != 'retur'`,
+        `SELECT COALESCE(SUM(o.qty * o.hpp_snapshot), 0) AS t
+         FROM orders o
+         WHERE ${owAliased}
+           AND o.status != 'retur'
+           AND NOT EXISTS (
+             SELECT 1 FROM orders x
+             WHERE x.order_no = o.order_no
+               AND x.store_id = o.store_id
+               AND DATE(x.order_date) = DATE(o.order_date)
+               AND x.nominal_cair IS NOT NULL
+           )`,
         pparams
       );
       const [lr] = await pool.query(
@@ -1571,8 +1896,8 @@ app.get('/api/dashboard', authRequired, async (req, res) => {
   }
 });
 
-/* ——— Users (admin) ——— */
-app.get('/api/users', authRequired, adminOnly, async (req, res) => {
+/* ——— Users (owner) ——— */
+app.get('/api/users', authRequired, staffExceptChecker, ownerOnly, async (req, res) => {
   const { page = 1, limit = 10, search = '' } = req.query;
   const { page: p, limit: l, offset } = paginate(page, limit);
   const q = `%${String(search).trim()}%`;
@@ -1587,22 +1912,20 @@ app.get('/api/users', authRequired, adminOnly, async (req, res) => {
   res.json({ data: rows, page: p, limit: l, total: c[0].c });
 });
 
-app.post('/api/users', authRequired, adminOnly, async (req, res) => {
+app.post('/api/users', authRequired, staffExceptChecker, ownerOnly, async (req, res) => {
   const { name, email, password, role } = req.body || {};
   if (!name?.trim() || !email?.trim() || !password)
     return res.status(400).json({ message: 'Nama, email, password wajib' });
+  const allowed = new Set(['owner', 'admin', 'karyawan', 'checker_pengiriman']);
+  let r = String(role || 'karyawan').trim();
+  if (!allowed.has(r)) r = 'karyawan';
   const hash = await bcrypt.hash(String(password), 10);
   try {
-    const [r] = await pool.query(
+    const [ins] = await pool.query(
       'INSERT INTO users (name, email, password_hash, role) VALUES (?,?,?,?)',
-      [
-        name.trim(),
-        String(email).trim().toLowerCase(),
-        hash,
-        role === 'admin' ? 'admin' : 'karyawan',
-      ]
+      [name.trim(), String(email).trim().toLowerCase(), hash, r]
     );
-    res.status(201).json({ id: r.insertId });
+    res.status(201).json({ id: ins.insertId });
   } catch (e) {
     if (e.code === 'ER_DUP_ENTRY')
       return res.status(400).json({ message: 'Email sudah terdaftar' });
@@ -1610,7 +1933,7 @@ app.post('/api/users', authRequired, adminOnly, async (req, res) => {
   }
 });
 
-app.delete('/api/users/:id', authRequired, adminOnly, async (req, res) => {
+app.delete('/api/users/:id', authRequired, staffExceptChecker, ownerOnly, async (req, res) => {
   if (String(req.params.id) === String(req.user.id))
     return res.status(400).json({ message: 'Tidak bisa hapus diri sendiri' });
   await pool.query('DELETE FROM users WHERE id = ?', [req.params.id]);

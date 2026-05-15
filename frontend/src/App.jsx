@@ -11,6 +11,7 @@ import StockInPage from './pages/StockInPage.jsx';
 import StockAuditPage from './pages/StockAuditPage.jsx';
 import StoresPage from './pages/StoresPage.jsx';
 import UsersPage from './pages/UsersPage.jsx';
+import WarehouseCourierPage from './pages/WarehouseCourierPage.jsx';
 
 function PrivateRoute({ children }) {
   const { user, ready } = useAuth();
@@ -26,6 +27,13 @@ function PrivateRoute({ children }) {
   return children;
 }
 
+function RoleHome() {
+  const { user } = useAuth();
+  if (user?.role === 'checker_pengiriman')
+    return <Navigate to="/kurir-gudang" replace />;
+  return <DashboardPage />;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -38,7 +46,7 @@ export default function App() {
           </PrivateRoute>
         }
       >
-        <Route index element={<DashboardPage />} />
+        <Route index element={<RoleHome />} />
         <Route path="orders" element={<OrdersPage />} />
         <Route path="products" element={<ProductsPage />} />
         <Route path="stock-in" element={<StockInPage />} />
@@ -46,6 +54,7 @@ export default function App() {
         <Route path="stock-history" element={<StockInHistoryPage />} />
         <Route path="stores" element={<StoresPage />} />
         <Route path="users" element={<UsersPage />} />
+        <Route path="kurir-gudang" element={<WarehouseCourierPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

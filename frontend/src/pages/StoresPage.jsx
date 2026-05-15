@@ -10,7 +10,7 @@ import StoreFormModal from '../components/StoreFormModal.jsx';
 const LIMIT = 10;
 
 export default function StoresPage() {
-  const { isAdmin } = useAuth();
+  const { isOwnerOrAdmin } = useAuth();
   const [searchInput, setSearchInput] = useState('');
   const search = useDebouncedValue(searchInput, 1000);
   const [page, setPage] = useState(1);
@@ -70,7 +70,7 @@ export default function StoresPage() {
           <Store size={28} strokeWidth={2} className="icon-title" aria-hidden />
           Master toko
         </h1>
-        {isAdmin && (
+        {isOwnerOrAdmin && (
           <button type="button" className="btn btn-primary" onClick={openCreateStore}>
             <Plus size={18} strokeWidth={2} aria-hidden />
             Tambah toko
@@ -93,7 +93,7 @@ export default function StoresPage() {
           <thead>
             <tr>
               <th>Nama</th>
-              {isAdmin && <th className="w-40">Aksi</th>}
+              {isOwnerOrAdmin && <th className="w-40">Aksi</th>}
             </tr>
           </thead>
           <tbody>
@@ -102,7 +102,7 @@ export default function StoresPage() {
                 <td>
                   <strong>{s.name}</strong>
                 </td>
-                {isAdmin && (
+                {isOwnerOrAdmin && (
                   <td className="whitespace-nowrap">
                     <div className="flex flex-wrap gap-1">
                       <button
@@ -133,7 +133,7 @@ export default function StoresPage() {
 
       <PaginationBar page={page} total={total} limit={LIMIT} onPageChange={setPage} />
 
-      {isAdmin && (
+      {isOwnerOrAdmin && (
         <StoreFormModal
           open={storeModalOpen}
           onClose={closeStoreModal}

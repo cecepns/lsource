@@ -48,20 +48,30 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
-  const value = useMemo(
-    () => ({
+  const value = useMemo(() => {
+    const role = user?.role;
+    const isOwner = role === 'owner';
+    const isAdmin = role === 'admin';
+    const isKaryawan = role === 'karyawan';
+    const isCheckerPengiriman = role === 'checker_pengiriman';
+    return {
       user,
       ready,
-      isAdmin: user?.role === 'admin',
+      role,
+      isOwner,
+      isAdmin,
+      isKaryawan,
+      isCheckerPengiriman,
+      /** Owner atau admin (bukan karyawan) — untuk hapus produk, kelola toko, dll. */
+      isOwnerOrAdmin: isOwner || isAdmin,
       reload: loadMe,
       logout,
       setUserFromLogin(u, token) {
         setToken(token);
         setUser(u);
       },
-    }),
-    [user, ready, loadMe, logout]
-  );
+    };
+  }, [user, ready, loadMe, logout]);
 
   return (
     <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

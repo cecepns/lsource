@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS users (
   name VARCHAR(191) NOT NULL,
   email VARCHAR(191) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
-  role ENUM('admin', 'karyawan') NOT NULL DEFAULT 'karyawan',
+  role ENUM('owner', 'admin', 'karyawan', 'checker_pengiriman') NOT NULL DEFAULT 'karyawan',
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uk_users_email (email)
 ) ENGINE=InnoDB;

@@ -60,7 +60,7 @@ function formatGroupNominalCair(o) {
 }
 
 export default function OrdersPage() {
-  const { isAdmin } = useAuth();
+  const { isOwner, isKaryawan } = useAuth();
   const [searchInput, setSearchInput] = useState('');
   const search = useDebouncedValue(searchInput, 1000);
   const [page, setPage] = useState(1);
@@ -79,6 +79,15 @@ export default function OrdersPage() {
   const [detailData, setDetailData] = useState(null);
   /** ID baris representatif (sama yang dipakai GET /api/orders/:id) untuk buka form edit dari modal. */
   const [detailListRowId, setDetailListRowId] = useState(null);
+
+  function shippedReadonlyKaryawan(listStatus) {
+    return isKaryawan && ['dikirim', 'selesai', 'retur', 'campuran'].includes(listStatus);
+  }
+
+  const detailEditLocked =
+    detailData &&
+    isKaryawan &&
+    ['dikirim', 'selesai', 'retur', 'campuran'].includes(detailData.status);
 
   const fetchOrders = useCallback(
     async (pageOverride) => {
@@ -345,6 +354,7 @@ export default function OrdersPage() {
                       <Eye size={14} strokeWidth={2} aria-hidden />
                       Lihat detail
                     </button>
+                    {!shippedReadonlyKaryawan(o.status) && (
                     <button
                       type="button"
                       className="btn btn-primary min-h-9 px-2.5 text-xs"
@@ -353,7 +363,8 @@ export default function OrdersPage() {
                       <Pencil size={14} strokeWidth={2} aria-hidden />
                       Edit
                     </button>
-                    {isAdmin && (
+                    )}
+                    {isOwner && (
                       <button
                         type="button"
                         className="btn min-h-9 border-0 bg-red-600 px-2.5 text-xs text-white shadow-sm hover:bg-red-700"
@@ -456,8 +467,9 @@ export default function OrdersPage() {
               <button
                 type="button"
                 className="btn btn-primary px-4"
+                disabled={!!detailEditLocked}
                 onClick={() => {
-                  if (detailListRowId != null) {
+                  if (detailListRowId != null && !detailEditLocked) {
                     closeDetailModal();
                     openEditOrder(detailListRowId);
                   }
