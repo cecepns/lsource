@@ -1,8 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api, toastApiError } from '../utils/api.js';
 import { toBackendUrl } from '../utils/endpoints.js';
 import Modal from './Modal.jsx';
 import ImagePreviewModal from './ImagePreviewModal.jsx';
+import PaginationBar from './PaginationBar.jsx';
+
+const LIMIT = 10;
+const LIMIT_OPTIONS = [10, 25, 50, 100];
 
 function formatDateTime(value) {
   if (!value) return '—';
@@ -12,6 +16,15 @@ function formatDateTime(value) {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(d);
+}
+
+function formatHappenedAt(item) {
+  if (!item?.happened_at) return '—';
+  if (item.type === 'stock_out') {
+    const m = String(item.happened_at).match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+  }
+  return formatDateTime(item.happened_at);
 }
 
 function typeLabel(item) {
@@ -37,28 +50,51 @@ export default function ProductHistoryModal({ open, onClose, productId }) {
   const [loading, setLoading] = useState(false);
   const [product, setProduct] = useState(null);
   const [rows, setRows] = useState([]);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(LIMIT);
+  const [total, setTotal] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
+
+  const fetchHistory = useCallback(async () => {
+    if (!productId) return;
+    setLoading(true);
+    try {
+      const { data } = await api.get(`/api/products/${productId}/stock-history`, {
+        params: { page, limit },
+      });
+      setProduct(data.product || null);
+      setRows(Array.isArray(data.data) ? data.data : []);
+      setTotal(Number(data.total) || 0);
+    } catch (e) {
+      toastApiError(e);
+      onClose();
+    } finally {
+      setLoading(false);
+    }
+  }, [productId, page, limit, onClose]);
+
+  useEffect(() => {
+    if (!open) {
+      setPage(1);
+      setLimit(LIMIT);
+      setRows([]);
+      setProduct(null);
+      setTotal(0);
+      return;
+    }
+    if (!productId) return;
+    setPage(1);
+  }, [open, productId]);
 
   useEffect(() => {
     if (!open || !productId) return;
-    setLoading(true);
-    api
-      .get(`/api/products/${productId}/stock-history`)
-      .then(({ data }) => {
-        setProduct(data.product || null);
-        setRows(Array.isArray(data.history) ? data.history : []);
-      })
-      .catch((e) => {
-        toastApiError(e);
-        onClose();
-      })
-      .finally(() => setLoading(false));
-  }, [open, productId, onClose]);
+    fetchHistory();
+  }, [open, productId, page, limit, fetchHistory]);
 
   return (
     <>
       <Modal open={open} onClose={onClose} title={product?.name ? `Histori ${product.name}` : 'Histori produk'} size="3xl">
-      {loading ? (
+      {loading && !rows.length ? (
         <p className="muted py-8 text-center">Memuat histori…</p>
       ) : (
         <div className="space-y-4">
@@ -91,7 +127,29 @@ export default function ProductHistoryModal({ open, onClose, productId }) {
             </div>
           )}
 
-          {!rows.length && <p className="muted py-3 text-sm">Belum ada histori pergerakan stok.</p>}
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <label className="text-sm text-slate-600">
+              Per halaman
+              <select
+                className="ml-2 rounded-md border border-slate-200 bg-white px-2 py-1 text-sm"
+                value={limit}
+                onChange={(e) => {
+                  setLimit(Number(e.target.value));
+                  setPage(1);
+                }}
+              >
+                {LIMIT_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {!rows.length && !loading && (
+            <p className="muted py-3 text-sm">Belum ada histori pergerakan stok.</p>
+          )}
           {!!rows.length && (
             <div className="overflow-hidden rounded-xl border border-slate-200">
               <table className="table-app">
@@ -106,7 +164,7 @@ export default function ProductHistoryModal({ open, onClose, productId }) {
                 <tbody>
                   {rows.map((r) => (
                     <tr key={`${r.type}-${r.ref_id}`}>
-                      <td>{formatDateTime(r.happened_at)}</td>
+                      <td>{formatHappenedAt(r)}</td>
                       <td>{typeLabel(r)}</td>
                       <td className="text-sm">
                         {r.type === 'stock_out' && (
@@ -123,6 +181,10 @@ export default function ProductHistoryModal({ open, onClose, productId }) {
                 </tbody>
               </table>
             </div>
+          )}
+
+          {total > 0 && (
+            <PaginationBar page={page} total={total} limit={limit} onPageChange={setPage} />
           )}
         </div>
       )}

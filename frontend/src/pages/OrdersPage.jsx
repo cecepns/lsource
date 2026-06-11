@@ -43,14 +43,13 @@ function formatMoney(n) {
 
 function formatDate(value) {
   if (!value) return '—';
-  // Jika backend kirim 'YYYY-MM-DD', tampilkan apa adanya (lebih aman, tidak kena timezone)
-  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
-    return value;
-  }
-  // Jika ISO / format lain, fallback ke tanggal lokal Indonesia (tanpa jam)
+  const s = String(value);
+  // Ambil bagian tanggal saja — hindari geser hari karena timezone (ISO dari MySQL DATE)
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return String(value);
-  return d.toLocaleDateString('id-ID');
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toISOString().slice(0, 10);
 }
 
 /** Nominal cair di list grup: jika semua baris belum ada nominal, tampilkan — */
