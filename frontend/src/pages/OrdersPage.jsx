@@ -49,7 +49,7 @@ function formatDate(value) {
   if (m) return m[1];
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return s;
-  return d.toISOString().slice(0, 10);
+  return format(d, 'yyyy-MM-dd');
 }
 
 /** Nominal cair di list grup: jika semua baris belum ada nominal, tampilkan — */

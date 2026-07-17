@@ -26,6 +26,7 @@ const pool = mysql.createPool({
   // Bantu mencegah putus idle connection yang memicu ECONNRESET di beberapa host.
   enableKeepAlive: true,
   keepAliveInitialDelay: 0,
+  dateStrings: true,
 });
 
 const app = express();

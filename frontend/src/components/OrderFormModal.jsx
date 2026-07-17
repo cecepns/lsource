@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { format } from 'date-fns';
 import { Plus, Save, Trash2 } from 'lucide-react';
 import Select from 'react-select';
 import Modal from './Modal.jsx';
@@ -30,7 +31,7 @@ const emptyHeader = {
   order_no: '',
   resi: '',
   store_id: null,
-  order_date: new Date().toISOString().slice(0, 10),
+  order_date: format(new Date(), 'yyyy-MM-dd'),
   status: 'diproses',
   nominal_cair: '',
   notes: '',

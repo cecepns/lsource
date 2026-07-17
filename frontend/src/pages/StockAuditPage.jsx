@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { format } from 'date-fns';
 import { ClipboardList, Save, Search, Trash2 } from 'lucide-react';
 import { api, apiCall, toastApiError } from '../utils/api.js';
 import { useDebouncedValue } from '../hooks/useDebouncedValue.js';
@@ -14,7 +15,7 @@ function formatMoney(n) {
 }
 
 function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
+  return format(new Date(), 'yyyy-MM-dd');
 }
 
 export default function StockAuditPage() {
